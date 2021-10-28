@@ -1,6 +1,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include "chip8.h"
+#include "io.h"
 
 #define ERROR {return (op << 16) | program_counter;}
 #define STEP {program_counter++; return 0;}
@@ -118,7 +119,7 @@ uint32_t add_register()
   X; Y;
   uint16_t tmp = regs[x];
   tmp += regs[y];
-  flags = (tmp > 0xff) ? 1 : 0;
+  FLAGS = (tmp > 0xff) ? 1 : 0;
   regs[x] = tmp;
   STEP;
 }
@@ -126,7 +127,7 @@ uint32_t add_register()
 uint32_t sub_register()
 {
   X; Y;
-  flags = (regs[x] > regs[y]) ? 1 : 0;
+  FLAGS = (regs[x] > regs[y]) ? 1 : 0;
   regs[x] -= regs[y];
   STEP;
 }
@@ -134,7 +135,7 @@ uint32_t sub_register()
 uint32_t shift_right()
 {
   X; Y;
-  flags = regs[x] & 0x1;
+  FLAGS = regs[x] & 0x1;
   regs[x] >>= regs[y];
   STEP;
 }
@@ -142,7 +143,7 @@ uint32_t shift_right()
 uint32_t subn_register()
 {
   X; Y;
-  flags = (regs[y] > regs[x]) ? 1 : 0;
+  FLAGS = (regs[y] > regs[x]) ? 1 : 0;
   regs[x] = regs[y] - regs[y];
   STEP;
 }
@@ -150,7 +151,7 @@ uint32_t subn_register()
 uint32_t shift_left()
 {
   X; Y;
-  flags = regs[x] & 0x8;
+  FLAGS = regs[x] & 0x8;
   regs[x] <<= regs[y];
   STEP;
 }
@@ -184,41 +185,11 @@ uint32_t random()
   STEP;
 }
 
-uint32_t draw_runtime()
-{
-  STEP; // XXX
-}
-
-uint32_t skip_key_down_runtime()
-{
-  STEP; // XXX
-}
-
-uint32_t skip_key_up_runtime()
-{
-  STEP; // XXX
-}
-
-uint32_t load_delay_timer_runtime()
+uint32_t load_delay_timer()
 {
   X;
   regs[x] = delay_timer;
-  STEP; // XXX
-}
-
-uint32_t load_on_key_runtime()
-{
-  STEP; // XXX
-}
-
-uint32_t set_delay_timer_runtime()
-{
-  STEP; // XXX
-}
-
-uint32_t set_sound_timer_runtime()
-{
-  STEP; // XXX
+  STEP;
 }
 
 uint32_t add_addr_immediate()
@@ -226,11 +197,6 @@ uint32_t add_addr_immediate()
   X;
   addr += regs[x];
   STEP;
-}
-
-uint32_t load_sprite_addr_runtime()
-{
-  STEP; // XXX
 }
 
 uint32_t store_bcd()
@@ -333,15 +299,18 @@ uint32_t basic_block()
     case 0xc:
       return random();
     case 0xd:
-      return draw_runtime();
+      draw_io();
+      STEP;
     case 0xe:
       {
         switch (op & 0x00ff)
           {
           case 0x9e:
-            return skip_key_down_runtime();
+            skip_key_down_io();
+            STEP;
           case 0xa1:
-            return skip_key_up_runtime();
+            skip_key_up_io();
+            STEP;
           default:
             ERROR;
           }
@@ -351,17 +320,21 @@ uint32_t basic_block()
         switch (op & 0x00ff)
           {
           case 0x07:
-            return load_delay_timer_runtime();
+            return load_delay_timer();
           case 0x0a:
-            return load_on_key_runtime();
+            load_on_key_io();
+            STEP;
           case 0x15:
-            return set_delay_timer_runtime();
+            set_delay_timer_io();
+            STEP;
           case 0x18:
-            return set_sound_timer_runtime();
+            set_sound_timer_io();
+            STEP;
           case 0x1e:
             return add_addr_immediate();
           case 0x29:
-            return load_sprite_addr_runtime();
+            load_sprite_addr_io();
+            STEP;
           case 0x33:
             return store_bcd();
           case 0x55:

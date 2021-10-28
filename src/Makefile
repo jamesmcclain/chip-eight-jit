@@ -2,9 +2,9 @@ CFLAGS ?= -Wall -Werror -Og -ggdb3
 CC = clang
 
 
-all: chip8.o interp.o
+all: chip8.o interp.o ncurses_io.o
 
-chip8: chip8.o
+chip8: chip8.o interp.o ncurses_io.o
 	$(CC) $^ $(LDFLAGS) -o $@
 
 %.o: %.c %.h
