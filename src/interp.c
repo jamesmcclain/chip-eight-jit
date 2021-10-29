@@ -299,8 +299,11 @@ uint32_t basic_block()
     case 0xc:
       return random();
     case 0xd:
-      draw_io();
-      STEP;
+      {
+        X; Y; IMMEDIATE4;
+        FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
+        STEP;
+      }
     case 0xe:
       {
         switch (op & 0x00ff)

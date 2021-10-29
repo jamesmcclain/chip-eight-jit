@@ -1,10 +1,16 @@
 #ifndef __IO_H__
 #define __IO_H__
 
-void init();
+#define DISPLAY_SIZE (128*64)
+
+extern uint8_t display[];
+extern int width;
+extern int height;
+
+void init(int width, int height);
 void deinit();
 
-void draw_io();
+int draw_io(int x, int y, int n, uint8_t * mem);
 void load_on_key_io();
 void load_sprite_addr_io();
 void set_delay_timer_io();
