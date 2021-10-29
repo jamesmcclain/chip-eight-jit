@@ -2,10 +2,10 @@ CFLAGS ?= -Wall -Werror -Og -ggdb3
 CC = clang
 
 
-all: chip8.o interp.o ncurses_io.o
+all: interp-test
 
-chip8: chip8.o interp.o ncurses_io.o
-	$(CC) $^ $(LDFLAGS) -o $@
+interp-test: interp-test.o chip8.o interp.o ncurses_io.o
+	$(CC) $^ $(LDFLAGS) -lncurses -o $@
 
 %.o: %.c %.h
 	$(CC) $(CFLAGS) $< -c -o $@

@@ -18,4 +18,7 @@ extern int8_t stack_pointer;
 extern uint16_t addr;
 extern uint16_t program_counter;
 
+void init_chip8();
+void deinit_chip8();
+
 #endif

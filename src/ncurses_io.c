@@ -1,4 +1,5 @@
 #include <string.h>
+#include <unistd.h>
 #include <ncurses.h>
 #include "io.h"
 
@@ -9,17 +10,21 @@ int width = 0;
 int height = 0;
 
 
-void init(int width, int height)
+void init_io(int width, int height)
 {
   initscr();
+
   cbreak();
   noecho();
+  timeout(0);
+
   window = newwin(height+2, width+2, 0, 0);
   box(window, 0, 0);
-  refresh();
+
+  refresh(); // XXX
 }
 
-void deinit()
+void deinit_io()
 {
   endwin();
 }
@@ -59,24 +64,54 @@ void clearscreen_io()
   refresh(); // XXX
 }
 
-void skip_key_down_io()
+uint16_t read_keys_io()
 {
-}
+  int key;
+  uint16_t keys_down = 0;
 
-void skip_key_up_io()
-{
-}
-
-void load_on_key_io()
-{
-}
-
-void set_delay_timer_io()
-{
-}
-
-void set_sound_timer_io()
-{
+  while ((key = getch()) != ERR)
+    {
+      switch(key)
+        {
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          keys_down |= (1<<(key - '0'));
+          break;
+        case 'a':
+        case 'A':
+          keys_down |= (1<<(0x0a));
+          break;
+        case 'b':
+        case 'B':
+          keys_down |= (1<<(0x0b));
+          break;
+        case 'c':
+        case 'C':
+          keys_down |= (1<<(0x0c));
+          break;
+        case 'd':
+        case 'D':
+          keys_down |= (1<<(0x0d));
+          break;
+        case 'e':
+        case 'E':
+          keys_down |= (1<<(0x0e));
+          break;
+        case 'f':
+        case 'F':
+          keys_down |= (1<<(0x0f));
+          break;
+        }
+    }
+  return keys_down;
 }
 
 void load_sprite_addr_io()

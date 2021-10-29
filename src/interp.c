@@ -11,7 +11,17 @@
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
 
+int8_t delay_timer = 0;
+int8_t sound_timer = 0;
+
 uint8_t op;
+
+
+uint32_t clearscreen()
+{
+  clearscreen_io();
+  STEP;
+}
 
 uint32_t jump()
 {
@@ -19,7 +29,7 @@ uint32_t jump()
   return 0;
 }
 
-uint32_t ret()
+uint32_t retern()
 {
   if (stack_pointer > 0)
     {
@@ -179,10 +189,24 @@ uint32_t random()
   STEP;
 }
 
-uint32_t load_delay_timer()
+uint32_t get_delay_timer()
 {
   X;
   regs[x] = delay_timer;
+  STEP;
+}
+
+uint32_t set_delay_timer()
+{
+  X;
+  delay_timer = regs[x];
+  STEP;
+}
+
+uint32_t set_sound_timer()
+{
+  X;
+  delay_timer = regs[x];
   STEP;
 }
 
@@ -196,7 +220,9 @@ uint32_t add_addr_immediate()
 uint32_t store_bcd()
 {
   X;
-  uint8_t tmp = regs[x], hundreds, tens;
+  uint8_t tmp = regs[x];
+  uint8_t hundreds, tens;
+
   hundreds = tmp / 100;
   tmp %= 100;
   tens = tmp / 10;
@@ -204,6 +230,45 @@ uint32_t store_bcd()
   memory[addr+0] = hundreds;
   memory[addr+1] = tens;
   memory[addr+2] = tmp;
+  STEP;
+}
+
+uint32_t skip_key_x(int up)
+{
+  X;
+  uint16_t keys_down;
+
+  keys_down = read_keys_io();
+  if ((keys_down & (1<<(regs[x]))) ^ up)
+    {
+      program_counter++;
+    }
+  STEP;
+}
+
+uint32_t load_on_key()
+{
+  X;
+  uint16_t keys_down = 0;
+
+  while (!keys_down)
+    {
+      keys_down = read_keys_io();
+    }
+  for (int i = 0; i < 0xf; ++i)
+    {
+      if (keys_down & (1<<i))
+        {
+          regs[x] = i;
+        }
+    }
+  STEP;
+}
+
+uint32_t draw()
+{
+  X; Y; IMMEDIATE4;
+  FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
   STEP;
 }
 
@@ -227,18 +292,24 @@ uint32_t restore_registers()
   STEP;
 }
 
+uint32_t load_sprite_addr()
+{
+  X;
+  addr = regs[x] * 5;
+  STEP;
+}
+
 uint32_t basic_block()
 {
   op = ntohs(memory[program_counter]);
 
   if (op == 0x00e0)
     {
-      clearscreen_io();
-      STEP;
+      return clearscreen();
     }
   else if (op == 0x00ee)
     {
-      return ret();
+      return retern();
     }
 
   switch ((op & 0xf000) >> 12)
@@ -294,21 +365,15 @@ uint32_t basic_block()
     case 0xc:
       return random();
     case 0xd:
-      {
-        X; Y; IMMEDIATE4;
-        FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
-        STEP;
-      }
+      return draw();
     case 0xe:
       {
         switch (op & 0x00ff)
           {
           case 0x9e:
-            skip_key_down_io();
-            STEP;
+            return skip_key_x(0);
           case 0xa1:
-            skip_key_up_io();
-            STEP;
+            return skip_key_x(1);
           default:
             ERROR;
           }
@@ -318,21 +383,17 @@ uint32_t basic_block()
         switch (op & 0x00ff)
           {
           case 0x07:
-            return load_delay_timer();
+            return get_delay_timer();
           case 0x0a:
-            load_on_key_io();
-            STEP;
+            return load_on_key();
           case 0x15:
-            set_delay_timer_io();
-            STEP;
+            return set_delay_timer();
           case 0x18:
-            set_sound_timer_io();
-            STEP;
+            return set_sound_timer();
           case 0x1e:
             return add_addr_immediate();
           case 0x29:
-            load_sprite_addr_io();
-            STEP;
+            return load_sprite_addr();
           case 0x33:
             return store_bcd();
           case 0x55:
