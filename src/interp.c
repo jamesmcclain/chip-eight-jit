@@ -19,12 +19,6 @@ uint32_t jump()
   return 0;
 }
 
-uint32_t cls()
-{
-  memset(display, 0, DISPLAY_SIZE * sizeof(uint8_t));
-  STEP;
-}
-
 uint32_t ret()
 {
   if (stack_pointer > 0)
@@ -239,7 +233,8 @@ uint32_t basic_block()
 
   if (op == 0x00e0)
     {
-      return cls();
+      clearscreen_io();
+      STEP;
     }
   else if (op == 0x00ee)
     {

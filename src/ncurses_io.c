@@ -1,3 +1,4 @@
+#include <string.h>
 #include <ncurses.h>
 #include "io.h"
 
@@ -44,11 +45,18 @@ int draw_io(int x, int y, int n, uint8_t * mem)
             {
               vf |= 1;
             }
-          mvwaddch(window, y2+1, x2+1, new_display_bit? 219: ' ');
+          mvwaddch(window, y2+1, x2+1, (new_display_bit? 219: ' '));
         }
     }
   refresh(); // XXX
   return vf;
+}
+
+void clearscreen_io()
+{
+  memset(display, 0, DISPLAY_SIZE * sizeof(uint8_t));
+  wclear(window);
+  refresh(); // XXX
 }
 
 void skip_key_down_io()
