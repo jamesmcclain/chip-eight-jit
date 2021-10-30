@@ -1,4 +1,7 @@
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <time.h>
 #include <arpa/inet.h>
 #include "chip8.h"
 #include "io.h"
@@ -10,12 +13,40 @@
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
+#define NANOS_PER_TICK (8333333)  // 120 Hz clock rate
 
+int tick = 0;
 int8_t delay_timer = 0;
 int8_t sound_timer = 0;
+uint16_t keys_down = 0;
 
 uint8_t op;
 
+
+void interrupt()
+{
+  struct timespec ts;
+  int tick2;
+
+  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+  tick2 = ts.tv_nsec / NANOS_PER_TICK;
+  if (tick2 != tick) // ~120 Hz I/O polling
+    {
+      keys_down = read_keys_io();
+    }
+  if ((tick2>>1) != (tick>>1)) // ~60 Hz counters
+    {
+      if (delay_timer > 0)
+        {
+          --delay_timer;
+        }
+      if (sound_timer > 0)
+        {
+          --sound_timer;
+        }
+      tick = tick2;
+    }
+}
 
 uint32_t clearscreen()
 {
@@ -25,12 +56,14 @@ uint32_t clearscreen()
 
 uint32_t jump()
 {
+  interrupt();
   program_counter = 0x0fff & op;
   return 0;
 }
 
 uint32_t retern()
 {
+  interrupt();
   if (stack_pointer > 0)
     {
       program_counter = stack[stack_pointer--];
@@ -42,6 +75,7 @@ uint32_t retern()
 
 uint32_t call()
 {
+  interrupt();
   if (stack_pointer + 1 < STACK_SIZE)
     {
       stack[++stack_pointer] = program_counter;
@@ -55,6 +89,7 @@ uint32_t call()
 uint32_t skip_eq_immediate()
 {
   X; IMMEDIATE8;
+
   if (regs[x] == immediate)
     program_counter++;
   STEP;
@@ -63,6 +98,7 @@ uint32_t skip_eq_immediate()
 uint32_t skip_neq_immediate()
 {
   X; IMMEDIATE8;
+
   if (regs[x] != immediate)
     program_counter++;
   STEP;
@@ -71,6 +107,7 @@ uint32_t skip_neq_immediate()
 uint32_t skip_eq_register()
 {
   X; Y;
+
   if (regs[x] == regs[y])
     program_counter++;
   STEP;
@@ -79,6 +116,7 @@ uint32_t skip_eq_register()
 uint32_t load_immediate()
 {
   X; IMMEDIATE8;
+
   regs[x] = immediate;
   STEP;
 }
@@ -86,6 +124,7 @@ uint32_t load_immediate()
 uint32_t add_immediate()
 {
   X; IMMEDIATE8;
+
   regs[x] += immediate;
   STEP;
 }
@@ -93,6 +132,7 @@ uint32_t add_immediate()
 uint32_t move()
 {
   X; Y;
+
   regs[x] = regs[y];
   STEP;
 }
@@ -100,6 +140,7 @@ uint32_t move()
 uint32_t or()
 {
   X; Y;
+
   regs[x] |= regs[y];
   STEP;
 }
@@ -107,6 +148,7 @@ uint32_t or()
 uint32_t and()
 {
   X; Y;
+
   regs[x] &= regs[y];
   STEP;
 }
@@ -114,6 +156,7 @@ uint32_t and()
 uint32_t xor()
 {
   X; Y;
+
   regs[x] ^= regs[y];
   STEP;
 }
@@ -121,6 +164,7 @@ uint32_t xor()
 uint32_t add_register()
 {
   X; Y;
+
   uint16_t tmp = regs[x];
   tmp += regs[y];
   FLAGS = (tmp > 0xff) ? 1 : 0;
@@ -131,6 +175,7 @@ uint32_t add_register()
 uint32_t sub_register()
 {
   X; Y;
+
   FLAGS = (regs[x] > regs[y]) ? 1 : 0;
   regs[x] -= regs[y];
   STEP;
@@ -139,6 +184,7 @@ uint32_t sub_register()
 uint32_t shift_right()
 {
   X; Y;
+
   FLAGS = regs[x] & 0x1;
   regs[x] >>= regs[y];
   STEP;
@@ -147,6 +193,7 @@ uint32_t shift_right()
 uint32_t subn_register()
 {
   X; Y;
+
   FLAGS = (regs[y] > regs[x]) ? 1 : 0;
   regs[x] = regs[y] - regs[y];
   STEP;
@@ -155,6 +202,7 @@ uint32_t subn_register()
 uint32_t shift_left()
 {
   X; Y;
+
   FLAGS = regs[x] & 0x8;
   regs[x] <<= regs[y];
   STEP;
@@ -163,6 +211,7 @@ uint32_t shift_left()
 uint32_t skip_neq_register()
 {
   X; Y;
+
   if (regs[x] == regs[y])
     program_counter++;
   STEP;
@@ -171,6 +220,7 @@ uint32_t skip_neq_register()
 uint32_t load_addr_immediate()
 {
   IMMEDIATE12;
+
   addr = immediate;
   STEP;
 }
@@ -178,20 +228,24 @@ uint32_t load_addr_immediate()
 uint32_t branch()
 {
   IMMEDIATE12;
+
+  interrupt();
   program_counter = immediate + regs[0];
   return 0;
 }
 
-uint32_t random()
+uint32_t random_byte()
 {
   X; IMMEDIATE8;
-  regs[x] = immediate;
+
+  regs[x] = rand() & 0xff & immediate;
   STEP;
 }
 
 uint32_t get_delay_timer()
 {
   X;
+
   regs[x] = delay_timer;
   STEP;
 }
@@ -199,6 +253,7 @@ uint32_t get_delay_timer()
 uint32_t set_delay_timer()
 {
   X;
+
   delay_timer = regs[x];
   STEP;
 }
@@ -206,6 +261,7 @@ uint32_t set_delay_timer()
 uint32_t set_sound_timer()
 {
   X;
+
   delay_timer = regs[x];
   STEP;
 }
@@ -213,6 +269,7 @@ uint32_t set_sound_timer()
 uint32_t add_addr_immediate()
 {
   X;
+
   addr += regs[x];
   STEP;
 }
@@ -236,9 +293,7 @@ uint32_t store_bcd()
 uint32_t skip_key_x(int up)
 {
   X;
-  uint16_t keys_down;
 
-  keys_down = read_keys_io();
   if ((keys_down & (1<<(regs[x]))) ^ up)
     {
       program_counter++;
@@ -249,17 +304,20 @@ uint32_t skip_key_x(int up)
 uint32_t load_on_key()
 {
   X;
-  uint16_t keys_down = 0;
 
-  while (!keys_down)
+  do
     {
+      usleep(1);
       keys_down = read_keys_io();
     }
+  while (!keys_down);
+
   for (int i = 0; i < 0xf; ++i)
     {
       if (keys_down & (1<<i))
         {
           regs[x] = i;
+          break;
         }
     }
   STEP;
@@ -268,6 +326,7 @@ uint32_t load_on_key()
 uint32_t draw()
 {
   X; Y; IMMEDIATE4;
+
   FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
   STEP;
 }
@@ -275,6 +334,7 @@ uint32_t draw()
 uint32_t save_registers()
 {
   X;
+
   for (int i = 0; i <= x; ++i)
     {
       memory[addr+i] = regs[i];
@@ -285,6 +345,7 @@ uint32_t save_registers()
 uint32_t restore_registers()
 {
   X;
+
   for (int i = 0; i <= x; ++i)
     {
       regs[i] = memory[addr+i];
@@ -295,6 +356,7 @@ uint32_t restore_registers()
 uint32_t load_sprite_addr()
 {
   X;
+
   addr = regs[x] * 5;
   STEP;
 }
@@ -363,7 +425,7 @@ uint32_t basic_block()
     case 0xb:
       return branch();
     case 0xc:
-      return random();
+      return random_byte();
     case 0xd:
       return draw();
     case 0xe:

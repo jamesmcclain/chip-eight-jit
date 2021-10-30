@@ -1,4 +1,6 @@
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 #include "chip8.h"
 
 uint16_t stack[STACK_SIZE];
@@ -21,13 +23,14 @@ uint8_t __attribute__((aligned(0x1000))) memory[MEMORY_SIZE] = {
   0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 };
 uint8_t regs[REGFILE_SIZE];
-
 int8_t stack_pointer = 0;
 uint16_t addr = 0;
 uint16_t program_counter = 0;
 
+
 void init_chip8()
 {
+  srand(time(NULL));
 }
 
 void deinit_chip8()
