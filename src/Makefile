@@ -1,4 +1,4 @@
-CFLAGS ?= -Wall -Werror -Og -ggdb3
+CFLAGS ?= -Wall -Werror -O0 -ggdb3
 CC = clang
 
 
@@ -16,3 +16,4 @@ clean:
 cleaner: clean
 
 cleanest: cleaner
+	rm -f interp-test

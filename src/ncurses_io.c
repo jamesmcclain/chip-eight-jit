@@ -10,12 +10,16 @@ int width = 0;
 int height = 0;
 
 
-void init_io(int width, int height)
+void init_io(int _width, int _height)
 {
+  width = _width;
+  height = _height;
+
   initscr();
   cbreak();
   noecho();
 
+  curs_set(0);
   window = newwin(height+2, width+2, 0, 0);
   wtimeout(window, 0);
   box(window, 0, 0);
@@ -48,7 +52,8 @@ int draw_io(int x, int y, int n, uint8_t * mem)
             {
               vf |= 1;
             }
-          mvwaddch(window, y2+1, x2+1, (new_display_bit? 219: ' '));
+          mvwaddch(window, y2+1, x2+1, (new_display_bit? ACS_CKBOARD : ACS_BULLET));
+          wrefresh(window);
         }
     }
   return vf;
