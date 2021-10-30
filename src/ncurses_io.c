@@ -13,15 +13,13 @@ int height = 0;
 void init_io(int width, int height)
 {
   initscr();
-
   cbreak();
   noecho();
-  timeout(0);
 
   window = newwin(height+2, width+2, 0, 0);
+  wtimeout(window, 0);
   box(window, 0, 0);
-
-  refresh(); // XXX
+  wrefresh(window);
 }
 
 void deinit_io()
@@ -53,7 +51,6 @@ int draw_io(int x, int y, int n, uint8_t * mem)
           mvwaddch(window, y2+1, x2+1, (new_display_bit? 219: ' '));
         }
     }
-  refresh(); // XXX
   return vf;
 }
 
@@ -61,7 +58,6 @@ void clearscreen_io()
 {
   memset(display, 0, DISPLAY_SIZE * sizeof(uint8_t));
   wclear(window);
-  refresh(); // XXX
 }
 
 uint16_t read_keys_io()
@@ -69,7 +65,7 @@ uint16_t read_keys_io()
   int key;
   uint16_t keys_down = 0;
 
-  while ((key = getch()) != ERR)
+  while ((key = wgetch(window)) != ERR)
     {
       switch(key)
         {
@@ -86,34 +82,22 @@ uint16_t read_keys_io()
           keys_down |= (1<<(key - '0'));
           break;
         case 'a':
-        case 'A':
-          keys_down |= (1<<(0x0a));
-          break;
         case 'b':
-        case 'B':
-          keys_down |= (1<<(0x0b));
-          break;
         case 'c':
-        case 'C':
-          keys_down |= (1<<(0x0c));
-          break;
         case 'd':
-        case 'D':
-          keys_down |= (1<<(0x0d));
-          break;
         case 'e':
-        case 'E':
-          keys_down |= (1<<(0x0e));
-          break;
         case 'f':
+          keys_down |= (1<<(key - 'a' + 0xa));
+          break;
+        case 'A':
+        case 'B':
+        case 'C':
+        case 'D':
+        case 'E':
         case 'F':
-          keys_down |= (1<<(0x0f));
+          keys_down |= (1<<(key - 'A' + 0xa));
           break;
         }
     }
   return keys_down;
-}
-
-void load_sprite_addr_io()
-{
 }

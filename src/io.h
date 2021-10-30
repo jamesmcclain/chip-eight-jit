@@ -13,6 +13,5 @@ void deinit_io();
 int draw_io(int x, int y, int n, uint8_t * mem);
 uint16_t read_keys_io();
 void clearscreen_io();
-void load_sprite_addr_io();
 
 #endif
