@@ -4,7 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+
 #include <arpa/inet.h>
+
 #include "chip8.h"
 #include "io.h"
 
@@ -15,9 +17,10 @@
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
-#define NANOS_PER_TICK (8333333)  // 120 Hz clock rate
+#define NANOS_PER_TICK (16666666) // ~60 Hz clock
 
-int tick = 0;
+struct timespec last;
+
 int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t keys_down = 0;
@@ -28,14 +31,10 @@ uint16_t op;
 void interrupt()
 {
   struct timespec ts;
-  int tick2;
 
-  /* clock_gettime(CLOCK_MONOTONIC_COARSE, &ts); */
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  tick2 = ts.tv_nsec / NANOS_PER_TICK;
-  if ((tick2>>1) != (tick>>1)) // ~60 Hz counters
+  if ((ts.tv_nsec / NANOS_PER_TICK) == 30)
     {
-      /* refresh_io(); */
       keys_down = read_keys_io();
       if (delay_timer > 0)
         {
@@ -45,7 +44,7 @@ void interrupt()
         {
           --sound_timer;
         }
-      tick = tick2;
+      refresh_io();
     }
 }
 
@@ -92,7 +91,9 @@ uint32_t skip_eq_immediate()
   X; IMMEDIATE8;
 
   if (regs[x] == immediate)
-    program_counter+=2;
+    {
+      program_counter+=2;
+    }
   STEP;
 }
 
@@ -101,7 +102,9 @@ uint32_t skip_neq_immediate()
   X; IMMEDIATE8;
 
   if (regs[x] != immediate)
-    program_counter+=2;
+    {
+      program_counter+=2;
+    }
   STEP;
 }
 
@@ -110,7 +113,9 @@ uint32_t skip_eq_register()
   X; Y;
 
   if (regs[x] == regs[y])
-    program_counter+=2;
+    {
+      program_counter+=2;
+    }
   STEP;
 }
 
@@ -247,6 +252,7 @@ uint32_t get_delay_timer()
 {
   X;
 
+  interrupt();
   regs[x] = delay_timer;
   STEP;
 }
@@ -255,6 +261,7 @@ uint32_t set_delay_timer()
 {
   X;
 
+  interrupt();
   delay_timer = regs[x];
   STEP;
 }
@@ -263,6 +270,7 @@ uint32_t set_sound_timer()
 {
   X;
 
+  interrupt();
   sound_timer = regs[x];
   STEP;
 }
@@ -295,7 +303,8 @@ uint32_t skip_key_x(int up)
 {
   X;
 
-  if ((keys_down & (1<<(regs[x]))) ^ up)
+  interrupt();
+  if (((keys_down & (1<<(regs[x]))) != 0) ^ up)
     {
       program_counter+=2;
     }
@@ -308,7 +317,7 @@ uint32_t load_on_key()
 
   do
     {
-      usleep(1);
+      usleep(0);
       keys_down = read_keys_io();
     }
   while (!keys_down);
