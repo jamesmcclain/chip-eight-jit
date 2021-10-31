@@ -2,9 +2,9 @@ CFLAGS ?= -Wall -Werror -O0 -ggdb3
 CC = clang
 
 
-all: interp-test
+all: interp
 
-interp-test: interp-test.o chip8.o interp.o ncurses_io.o
+interp: interp.o chip8.o ncurses_io.o
 	$(CC) $^ $(LDFLAGS) -lncurses -o $@
 
 %.o: %.c %.h
@@ -16,4 +16,4 @@ clean:
 cleaner: clean
 
 cleanest: cleaner
-	rm -f interp-test
+	rm -f interp

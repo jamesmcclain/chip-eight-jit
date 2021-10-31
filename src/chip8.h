@@ -7,6 +7,7 @@
 #define MEMORY_SIZE (0x1000)
 #define REGFILE_SIZE (0x10)
 #define FLAGS regs[15]
+#define ENTRYPOINT (0x200)
 
 extern uint16_t stack[];
 extern uint8_t memory[];

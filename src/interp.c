@@ -1,4 +1,6 @@
+#include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -7,7 +9,7 @@
 #include "io.h"
 
 #define ERROR {return (op << 16) | program_counter;}
-#define STEP {program_counter++; return 0;}
+#define STEP {program_counter+=2; return 0;}
 #define X uint8_t x = (op >> 8) & 0xf
 #define Y uint8_t y = (op >> 4) & 0xf
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
@@ -20,7 +22,7 @@ int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t keys_down = 0;
 
-uint8_t op;
+uint16_t op;
 
 
 void interrupt()
@@ -28,7 +30,8 @@ void interrupt()
   struct timespec ts;
   int tick2;
 
-  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+  /* clock_gettime(CLOCK_MONOTONIC_COARSE, &ts); */
+  clock_gettime(CLOCK_MONOTONIC, &ts);
   tick2 = ts.tv_nsec / NANOS_PER_TICK;
   if (tick2 != tick) // ~120 Hz I/O polling
     {
@@ -66,7 +69,7 @@ uint32_t retern()
   interrupt();
   if (stack_pointer > 0)
     {
-      program_counter = stack[stack_pointer--];
+      program_counter = stack[--stack_pointer];
       return 0;
     }
   else
@@ -78,7 +81,7 @@ uint32_t call()
   interrupt();
   if (stack_pointer + 1 < STACK_SIZE)
     {
-      stack[++stack_pointer] = program_counter;
+      stack[stack_pointer++] = program_counter;
       program_counter = 0x0fff & op;
       return 0;
     }
@@ -91,7 +94,7 @@ uint32_t skip_eq_immediate()
   X; IMMEDIATE8;
 
   if (regs[x] == immediate)
-    program_counter++;
+    program_counter+=2;
   STEP;
 }
 
@@ -100,7 +103,7 @@ uint32_t skip_neq_immediate()
   X; IMMEDIATE8;
 
   if (regs[x] != immediate)
-    program_counter++;
+    program_counter+=2;
   STEP;
 }
 
@@ -109,7 +112,7 @@ uint32_t skip_eq_register()
   X; Y;
 
   if (regs[x] == regs[y])
-    program_counter++;
+    program_counter+=2;
   STEP;
 }
 
@@ -213,7 +216,7 @@ uint32_t skip_neq_register()
   X; Y;
 
   if (regs[x] == regs[y])
-    program_counter++;
+    program_counter+=2;
   STEP;
 }
 
@@ -296,7 +299,7 @@ uint32_t skip_key_x(int up)
 
   if ((keys_down & (1<<(regs[x]))) ^ up)
     {
-      program_counter++;
+      program_counter+=2;
     }
   STEP;
 }
@@ -363,7 +366,7 @@ uint32_t load_sprite_addr()
 
 uint32_t basic_block()
 {
-  op = ntohs(memory[program_counter]);
+  op = ntohs(((uint16_t *)memory)[program_counter>>1]);
 
   if (op == 0x00e0)
     {
@@ -467,4 +470,42 @@ uint32_t basic_block()
     default:
       ERROR;
     }
+}
+
+// ------------------------------------------------------------------------
+
+int main(int argc, const char * argv[])
+{
+  FILE * fp;
+  int count = 0;
+
+  if (argc <= 1)
+    {
+      fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
+      exit(-1);
+    }
+
+  // load
+  fp = fopen(argv[1], "r");
+  fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp);
+  fclose(fp);
+
+  // initialize
+  init_chip8();
+  init_io(64, 32);
+
+  // transfer
+  program_counter = ENTRYPOINT;
+  while (1)
+    {
+      if (basic_block())
+        {
+          raise(SIGTRAP);
+        }
+      count++;
+    }
+
+  deinit_io();
+  deinit_chip8();
+  exit(0);
 }
