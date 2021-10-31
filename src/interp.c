@@ -18,23 +18,30 @@
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
 #define NANOS_PER_TICK (16666666) // ~60 Hz clock
+#define TICKS_PER_SECOND (60) // ~60 Hz clock
 
-struct timespec last;
+int last_tick = 0;
 
 int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t keys_down = 0;
-uint16_t op;
+uint16_t op = 0;
 
 
-int interrupt()
+int tick()
 {
-  struct timespec current;
+  struct timespec spec;
 
-  clock_gettime(CLOCK_BOOTTIME, &current);
-  if ((current.tv_sec > last.tv_sec) || (current.tv_nsec - last.tv_nsec > NANOS_PER_TICK))
+  clock_gettime(CLOCK_MONOTONIC, &spec);
+  return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
+}
+
+void countdown()
+{
+  int current_tick = tick();
+
+  if (current_tick != last_tick)
     {
-      keys_down = read_keys_io();
       if (delay_timer > 0)
         {
           --delay_timer;
@@ -43,13 +50,9 @@ int interrupt()
         {
           --sound_timer;
         }
-      last = current;
+      last_tick = current_tick;
+      keys_down = read_keys_io();
       refresh_io();
-      return 1;
-    }
-  else
-    {
-      return 0;
     }
 }
 
@@ -61,14 +64,14 @@ uint32_t clearscreen()
 
 uint32_t jump()
 {
-  interrupt();
+  countdown();
   program_counter = 0x0fff & op;
   return 0;
 }
 
 uint32_t retern()
 {
-  interrupt();
+  countdown();
   if (stack_pointer > 0)
     {
       program_counter = stack[--stack_pointer];
@@ -80,7 +83,7 @@ uint32_t retern()
 
 uint32_t call()
 {
-  interrupt();
+  countdown();
   if (stack_pointer + 1 < STACK_SIZE)
     {
       stack[stack_pointer++] = program_counter + 2;
@@ -240,7 +243,6 @@ uint32_t branch()
 {
   IMMEDIATE12;
 
-  interrupt();
   program_counter = immediate + regs[0];
   return 0;
 }
@@ -304,8 +306,13 @@ uint32_t store_bcd()
 uint32_t skip_key_x(int up)
 {
   X;
+  int current_tick;
 
-  while (!interrupt()); // XXX
+  while (last_tick == (current_tick = tick()))
+    {
+      usleep((NANOS_PER_TICK / 1000) >> 2);
+    }
+  countdown();
   if (((keys_down & (1<<(regs[x]))) != 0) ^ up)
     {
       program_counter+=2;
@@ -319,7 +326,6 @@ uint32_t load_on_key()
 
   do
     {
-      usleep(0);
       keys_down = read_keys_io();
     }
   while (!keys_down);
@@ -329,7 +335,6 @@ uint32_t load_on_key()
       if (keys_down & (1<<i))
         {
           regs[x] = i;
-          break;
         }
     }
   STEP;
@@ -500,7 +505,7 @@ int main(int argc, const char * argv[])
   fclose(fp);
 
   // initialize
-  clock_gettime(CLOCK_BOOTTIME, &last);
+  last_tick = tick();
   init_chip8();
   init_io(64, 32);
 
@@ -508,6 +513,7 @@ int main(int argc, const char * argv[])
   program_counter = ENTRYPOINT;
   while (1)
     {
+      countdown();
       if (basic_block())
         {
           raise(SIGTRAP);

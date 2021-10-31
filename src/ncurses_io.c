@@ -8,6 +8,7 @@ WINDOW * window;
 uint8_t __attribute__((aligned(0x1000))) display[DISPLAY_SIZE];
 int width = 0;
 int height = 0;
+#define BORDER (2)
 
 
 void init_io(int _width, int _height)
@@ -20,14 +21,15 @@ void init_io(int _width, int _height)
   noecho();
 
   curs_set(0);
-  window = newwin(height+2, width+2, 0, 0);
+  window = newpad(height+BORDER, width+BORDER);
   wtimeout(window, 0);
   box(window, 0, 0);
-  wrefresh(window);
+  refresh_io();
 }
 
 void deinit_io()
 {
+  delwin(window);
   endwin();
 }
 
@@ -47,12 +49,16 @@ int draw_io(int x, int y, int n, uint8_t * mem)
           uint8_t old_display_bit = display[x2 + y2*width];
           uint8_t new_display_bit = old_display_bit ^= mem_bit;
 
-          display[x2 + y2*width] = new_display_bit;
-          if (old_display_bit & !new_display_bit)
+          if (x2 < width && y2 < height)
             {
-              vf |= 1;
+              display[x2 + y2*width] = new_display_bit;
+              if (old_display_bit & !new_display_bit)
+                {
+                  vf |= 1;
+                }
+              /* mvwaddch(window, y2+1, x2+1, (new_display_bit? ACS_CKBOARD : ACS_BULLET)); */
+              mvwaddch(window, y2+1, x2+1, (new_display_bit? 'X' : ' '));
             }
-          mvwaddch(window, y2+1, x2+1, (new_display_bit? ACS_CKBOARD : ACS_BULLET));
         }
     }
   return vf;
@@ -108,5 +114,5 @@ uint16_t read_keys_io()
 
 void refresh_io()
 {
-  wrefresh(window);
+  prefresh(window, 0, 0, 0, 0, height+BORDER, width+BORDER);
 }
