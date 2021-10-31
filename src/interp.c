@@ -24,16 +24,15 @@ struct timespec last;
 int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t keys_down = 0;
-
 uint16_t op;
 
 
-void interrupt()
+int interrupt()
 {
-  struct timespec ts;
+  struct timespec current;
 
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  if ((ts.tv_nsec / NANOS_PER_TICK) == 30)
+  clock_gettime(CLOCK_BOOTTIME, &current);
+  if ((current.tv_sec > last.tv_sec) || (current.tv_nsec - last.tv_nsec > NANOS_PER_TICK))
     {
       keys_down = read_keys_io();
       if (delay_timer > 0)
@@ -44,7 +43,13 @@ void interrupt()
         {
           --sound_timer;
         }
+      last = current;
       refresh_io();
+      return 1;
+    }
+  else
+    {
+      return 0;
     }
 }
 
@@ -252,7 +257,6 @@ uint32_t get_delay_timer()
 {
   X;
 
-  interrupt();
   regs[x] = delay_timer;
   STEP;
 }
@@ -261,7 +265,6 @@ uint32_t set_delay_timer()
 {
   X;
 
-  interrupt();
   delay_timer = regs[x];
   STEP;
 }
@@ -270,7 +273,6 @@ uint32_t set_sound_timer()
 {
   X;
 
-  interrupt();
   sound_timer = regs[x];
   STEP;
 }
@@ -303,7 +305,7 @@ uint32_t skip_key_x(int up)
 {
   X;
 
-  interrupt();
+  while (!interrupt()); // XXX
   if (((keys_down & (1<<(regs[x]))) != 0) ^ up)
     {
       program_counter+=2;
@@ -498,6 +500,7 @@ int main(int argc, const char * argv[])
   fclose(fp);
 
   // initialize
+  clock_gettime(CLOCK_BOOTTIME, &last);
   init_chip8();
   init_io(64, 32);
 
