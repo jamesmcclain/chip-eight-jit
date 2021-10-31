@@ -33,12 +33,10 @@ void interrupt()
   /* clock_gettime(CLOCK_MONOTONIC_COARSE, &ts); */
   clock_gettime(CLOCK_MONOTONIC, &ts);
   tick2 = ts.tv_nsec / NANOS_PER_TICK;
-  if (tick2 != tick) // ~120 Hz I/O polling
-    {
-      keys_down = read_keys_io();
-    }
   if ((tick2>>1) != (tick>>1)) // ~60 Hz counters
     {
+      /* refresh_io(); */
+      keys_down = read_keys_io();
       if (delay_timer > 0)
         {
           --delay_timer;
@@ -81,7 +79,7 @@ uint32_t call()
   interrupt();
   if (stack_pointer + 1 < STACK_SIZE)
     {
-      stack[stack_pointer++] = program_counter;
+      stack[stack_pointer++] = program_counter + 2;
       program_counter = 0x0fff & op;
       return 0;
     }
@@ -265,7 +263,7 @@ uint32_t set_sound_timer()
 {
   X;
 
-  delay_timer = regs[x];
+  sound_timer = regs[x];
   STEP;
 }
 

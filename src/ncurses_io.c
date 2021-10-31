@@ -53,7 +53,6 @@ int draw_io(int x, int y, int n, uint8_t * mem)
               vf |= 1;
             }
           mvwaddch(window, y2+1, x2+1, (new_display_bit? ACS_CKBOARD : ACS_BULLET));
-          wrefresh(window);
         }
     }
   return vf;
@@ -105,4 +104,9 @@ uint16_t read_keys_io()
         }
     }
   return keys_down;
+}
+
+void refresh_io()
+{
+  wrefresh(window);
 }
