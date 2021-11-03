@@ -17,8 +17,8 @@
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
-#define NANOS_PER_TICK (16666666) // ~60 Hz clock
-#define TICKS_PER_SECOND (60) // ~60 Hz clock
+#define NANOS_PER_TICK (2777777) // ~360 Hz clock
+#define TICKS_PER_SECOND (360) // ~360 Hz clock
 
 int last_tick = 0;
 
@@ -36,9 +36,9 @@ int tick()
   return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
 }
 
-void countdown()
+void interrupt()
 {
-  int current_tick = tick();
+  int current_tick = tick() % 60;
 
   if (current_tick != last_tick)
     {
@@ -52,7 +52,6 @@ void countdown()
         }
       last_tick = current_tick;
       keys_down = read_keys_io();
-      refresh_io();
     }
 }
 
@@ -64,14 +63,14 @@ uint32_t clearscreen()
 
 uint32_t jump()
 {
-  countdown();
+  interrupt();
   program_counter = 0x0fff & op;
   return 0;
 }
 
 uint32_t retern()
 {
-  countdown();
+  interrupt();
   if (stack_pointer > 0)
     {
       program_counter = stack[--stack_pointer];
@@ -83,7 +82,7 @@ uint32_t retern()
 
 uint32_t call()
 {
-  countdown();
+  interrupt();
   if (stack_pointer + 1 < STACK_SIZE)
     {
       stack[stack_pointer++] = program_counter + 2;
@@ -306,13 +305,7 @@ uint32_t store_bcd()
 uint32_t skip_key_x(int up)
 {
   X;
-  int current_tick;
 
-  while (last_tick == (current_tick = tick()))
-    {
-      usleep((NANOS_PER_TICK / 1000) >> 2);
-    }
-  countdown();
   if (((keys_down & (1<<(regs[x]))) != 0) ^ up)
     {
       program_counter+=2;
@@ -343,8 +336,15 @@ uint32_t load_on_key()
 uint32_t draw()
 {
   X; Y; IMMEDIATE4;
+  int current_tick;
 
   FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
+  while((current_tick = (tick() % 60)) == last_tick)
+    {
+      usleep(NANOS_PER_TICK>>10);
+    }
+  last_tick = current_tick;
+  refresh_io();
   STEP;
 }
 
@@ -505,7 +505,7 @@ int main(int argc, const char * argv[])
   fclose(fp);
 
   // initialize
-  last_tick = tick();
+  last_tick = tick() % 60;
   init_chip8();
   init_io(64, 32);
 
@@ -513,7 +513,7 @@ int main(int argc, const char * argv[])
   program_counter = ENTRYPOINT;
   while (1)
     {
-      countdown();
+      interrupt();
       if (basic_block())
         {
           raise(SIGTRAP);
