@@ -24,7 +24,7 @@ int last_tick = 0;
 
 int8_t delay_timer = 0;
 int8_t sound_timer = 0;
-uint16_t keys_down = 0;
+uint32_t keys_down = 0;
 uint16_t op = 0;
 
 
@@ -323,7 +323,7 @@ uint32_t load_on_key()
     }
   while (!keys_down);
 
-  for (int i = 0; i < 0xf; ++i)
+  for (int i = 0; i < 0x10; ++i)
     {
       if (keys_down & (1<<i))
         {
@@ -511,7 +511,7 @@ int main(int argc, const char * argv[])
 
   // transfer
   program_counter = ENTRYPOINT;
-  while (1)
+  while ((keys_down & (1<<31)) == 0)
     {
       interrupt();
       if (basic_block())

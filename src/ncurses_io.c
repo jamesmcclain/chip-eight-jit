@@ -10,6 +10,8 @@ int width = 0;
 int height = 0;
 #define BORDER (2)
 
+#define KEY_ESC (27)
+
 
 void init_io(int _width, int _height)
 {
@@ -70,10 +72,10 @@ void clearscreen_io()
   wclear(window);
 }
 
-uint16_t read_keys_io()
+uint32_t read_keys_io()
 {
   int key;
-  uint16_t keys_down = 0;
+  uint32_t keys_down = 0;
 
   while ((key = wgetch(window)) != ERR)
     {
@@ -106,6 +108,11 @@ uint16_t read_keys_io()
         case 'E':
         case 'F':
           keys_down |= (1<<(key - 'A' + 0xa));
+          break;
+        case 'q':
+        case 'Q':
+        case KEY_ESC:
+          keys_down |= (1<<31);
           break;
         }
     }
