@@ -86,8 +86,10 @@ uint32_t clearscreen()
 
 uint32_t jump()
 {
+  IMMEDIATE12;
+
   interrupt();
-  program_counter = 0x0fff & op;
+  program_counter = immediate;
   return 0;
 }
 
@@ -203,8 +205,7 @@ uint32_t add_register()
 {
   X; Y;
 
-  uint16_t tmp = regs[x];
-  tmp += regs[y];
+  uint16_t tmp = regs[x] + regs[y];
   FLAGS = (tmp > 0xff) ? 1 : 0;
   regs[x] = tmp;
   STEP;
@@ -223,7 +224,7 @@ uint32_t shift_right()
 {
   X; Y;
 
-  FLAGS = regs[x] & 0x1;
+  FLAGS = regs[x] & 0x01;
   regs[x] >>= regs[y];
   STEP;
 }
@@ -233,7 +234,7 @@ uint32_t subn_register()
   X; Y;
 
   FLAGS = (regs[y] > regs[x]) ? 1 : 0;
-  regs[x] = regs[y] - regs[y];
+  regs[x] = regs[y] - regs[x];
   STEP;
 }
 
@@ -241,7 +242,7 @@ uint32_t shift_left()
 {
   X; Y;
 
-  FLAGS = regs[x] & 0x8;
+  FLAGS = regs[x] & 0x80;
   regs[x] <<= regs[y];
   STEP;
 }
@@ -344,23 +345,29 @@ uint32_t load_on_key()
   X;
   uint32_t all_keys = 0;
 
-  interrupt();
-
   do
     {
-      usleep(NANOS_PER_TICK>>10);
-    }
-  while (((all_keys = all_keys_down()) & 0xff) == 0);
+      usleep(10);
+      all_keys = read_keys_io();
+    } while((all_keys) == 0);
 
-  for (int i = 0; i < 0x10; ++i)
+  for (int i = 0; i < 16; ++i)
     {
+      clear_key(i);
       if (all_keys & (1<<i))
         {
-          clear_key(i);
           regs[x] = i;
         }
     }
-  STEP;
+
+  if (all_keys & (1<<31))
+    {
+      ERROR;
+    }
+  else
+    {
+      STEP;
+    }
 }
 
 uint32_t draw()
@@ -551,7 +558,7 @@ int main(int argc, const char * argv[])
         }
       if (basic_block())
         {
-          raise(SIGTRAP);
+          break;
         }
       count++;
     }
@@ -566,6 +573,8 @@ int main(int argc, const char * argv[])
   fprintf(stderr, "$pc = 0x%04X\n", program_counter);
   fprintf(stderr, "$addr = 0x%04X\n", addr);
   fprintf(stderr, "stack[%d] = 0x%04X\n", stack_pointer, stack[stack_pointer]);
+  fprintf(stderr, "delay = %d\n", delay_timer);
+  fprintf(stderr, "sound = %d\n", sound_timer);
 
   exit(0);
 }
