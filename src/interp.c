@@ -105,11 +105,13 @@ uint32_t retern()
 
 uint32_t call()
 {
+  IMMEDIATE12;
+
   interrupt();
   if (stack_pointer + 1 < STACK_SIZE)
     {
       stack[stack_pointer++] = program_counter + 2;
-      program_counter = 0x0fff & op;
+      program_counter = immediate;
       return 0;
     }
   else
@@ -301,7 +303,7 @@ uint32_t set_sound_timer()
   STEP;
 }
 
-uint32_t add_addr_immediate()
+uint32_t add_addr()
 {
   X;
 
@@ -499,7 +501,7 @@ uint32_t basic_block()
           case 0x18:
             return set_sound_timer();
           case 0x1e:
-            return add_addr_immediate();
+            return add_addr();
           case 0x29:
             return load_sprite_addr();
           case 0x33:
@@ -556,5 +558,14 @@ int main(int argc, const char * argv[])
 
   deinit_io();
   deinit_chip8();
+
+  for (int i = 0; i < REGFILE_SIZE; ++i)
+    {
+      fprintf(stderr, "V%02d = 0x%02X\n", i, regs[i]);
+    }
+  fprintf(stderr, "$pc = 0x%04X\n", program_counter);
+  fprintf(stderr, "$addr = 0x%04X\n", addr);
+  fprintf(stderr, "stack[%d] = 0x%04X\n", stack_pointer, stack[stack_pointer]);
+
   exit(0);
 }
