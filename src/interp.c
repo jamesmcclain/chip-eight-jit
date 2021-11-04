@@ -17,16 +17,38 @@
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
-#define NANOS_PER_TICK (2777777) // ~360 Hz clock
-#define TICKS_PER_SECOND (360) // ~360 Hz clock
+#define NANOS_PER_TICK (16666666) // ~60 Hz clock
+#define TICKS_PER_SECOND (60) // ~60 Hz clock
 
 int last_tick = 0;
 
 int8_t delay_timer = 0;
 int8_t sound_timer = 0;
-uint32_t keys_down = 0;
 uint16_t op = 0;
 
+#define INPUT_TICKS (30)
+uint32_t keys_down[INPUT_TICKS];
+int interrupt_count = 0;
+
+
+void clear_key(uint8_t key)
+{
+  for (int i = 0; i < INPUT_TICKS; ++i)
+    {
+      keys_down[i] &= (0xffff ^ (1<<key));
+    }
+}
+
+uint32_t all_keys_down()
+{
+  uint32_t all_keys = 0;
+
+  for (int i = 0; i < INPUT_TICKS; ++i)
+    {
+      all_keys |= keys_down[i];
+    }
+  return all_keys;
+}
 
 int tick()
 {
@@ -38,7 +60,7 @@ int tick()
 
 void interrupt()
 {
-  int current_tick = tick() % 60;
+  int current_tick = tick();
 
   if (current_tick != last_tick)
     {
@@ -51,8 +73,9 @@ void interrupt()
           --sound_timer;
         }
       last_tick = current_tick;
-      keys_down = read_keys_io();
     }
+  keys_down[interrupt_count] = read_keys_io();
+  interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
 }
 
 uint32_t clearscreen()
@@ -306,8 +329,9 @@ uint32_t skip_key_x(int up)
 {
   X;
 
-  if (((keys_down & (1<<(regs[x]))) != 0) ^ up)
+  if (((all_keys_down() & (1<<(regs[x]))) != 0) ^ up)
     {
+      clear_key(regs[x]);
       program_counter+=2;
     }
   STEP;
@@ -316,17 +340,21 @@ uint32_t skip_key_x(int up)
 uint32_t load_on_key()
 {
   X;
+  uint32_t all_keys = 0;
+
+  interrupt();
 
   do
     {
-      keys_down = read_keys_io();
+      usleep(NANOS_PER_TICK>>10);
     }
-  while (!keys_down);
+  while (((all_keys = all_keys_down()) & 0xff) == 0);
 
   for (int i = 0; i < 0x10; ++i)
     {
-      if (keys_down & (1<<i))
+      if (all_keys & (1<<i))
         {
+          clear_key(i);
           regs[x] = i;
         }
     }
@@ -338,8 +366,9 @@ uint32_t draw()
   X; Y; IMMEDIATE4;
   int current_tick;
 
+  interrupt();
   FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
-  while((current_tick = (tick() % 60)) == last_tick)
+  while((current_tick = tick()) == last_tick)
     {
       usleep(NANOS_PER_TICK>>10);
     }
@@ -505,15 +534,19 @@ int main(int argc, const char * argv[])
   fclose(fp);
 
   // initialize
-  last_tick = tick() % 60;
+  last_tick = tick();
   init_chip8();
   init_io(64, 32);
 
   // transfer
   program_counter = ENTRYPOINT;
-  while ((keys_down & (1<<31)) == 0)
+  while (1)
     {
       interrupt();
+      if (all_keys_down() & (1<<31))
+        {
+          break;
+        }
       if (basic_block())
         {
           raise(SIGTRAP);
