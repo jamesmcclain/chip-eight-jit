@@ -1,5 +1,6 @@
 #include <string.h>
 #include <unistd.h>
+#include <assert.h>
 #include <ncurses.h>
 #include "io.h"
 
@@ -8,7 +9,6 @@ WINDOW * window;
 uint8_t __attribute__((aligned(0x1000))) display[DISPLAY_SIZE];
 int width = 0;
 int height = 0;
-#define BORDER (2)
 
 #define KEY_ESC (27)
 
@@ -23,7 +23,7 @@ void init_io(int _width, int _height)
   noecho();
 
   curs_set(0);
-  window = newpad(height+BORDER, width+BORDER);
+  window = newpad(height+3, width+2);
   wtimeout(window, 0);
   box(window, 0, 0);
   refresh_io();
@@ -35,33 +35,31 @@ void deinit_io()
   endwin();
 }
 
-int draw_io(int x, int y, int n, uint8_t * mem)
+int draw_io(int x, int y, int n, uint8_t* mem)
 {
   int vf = 0;
 
   for (int j = 0; j < n; ++j)
     {
-      int y2 = y + j;
-      uint8_t mem_byte = mem[j];
+      int y2 = (j + y) % height;
+      uint8_t byte = mem[j];
 
       for (int i = 0; i < 8; ++i)
         {
-          int x2 = x + i;
-          uint8_t mem_bit = (mem_byte >> (7-i)) & 0x1;
-          uint8_t old_display_bit = display[x2 + y2*width];
-          uint8_t new_display_bit = old_display_bit ^= mem_bit;
+          int x2 = (i + x) % width;
+          int bit = (byte & (0x80>>i)) ? 1: 0;
+          int old_pixel = display[x2 + y2*width];
+          int new_pixel = old_pixel ^ bit;
 
-          if (x2 < width && y2 < height)
+          display[x2 + y2*width] = new_pixel;
+          if (old_pixel && bit)
             {
-              display[x2 + y2*width] = new_display_bit;
-              if (old_display_bit & !new_display_bit)
-                {
-                  vf |= 1;
-                }
-              mvwaddch(window, y2+1, x2+1, (new_display_bit? ACS_CKBOARD : ' '));
+              vf |= 1;
             }
+          mvwaddch(window, y2+1, x2+1, (new_pixel? ACS_CKBOARD : ' '));
         }
     }
+
   return vf;
 }
 
@@ -120,5 +118,5 @@ uint32_t read_keys_io()
 
 void refresh_io()
 {
-  prefresh(window, 0, 0, 0, 0, height+BORDER, width+BORDER);
+  prefresh(window, 0, 0, 0, 0, height+3, width+2);
 }
