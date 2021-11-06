@@ -1,2 +1,5 @@
 roms/
+*.asm
+*.o
 interp
+disas
