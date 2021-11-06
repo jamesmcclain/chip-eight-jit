@@ -12,9 +12,6 @@ int height = 0;
 
 #define KEY_ESC (27)
 
-#define X3 (x2 % width)
-#define Y3 (y2 % height)
-
 
 void init_io(int _width, int _height)
 {
@@ -38,34 +35,31 @@ void deinit_io()
   endwin();
 }
 
-int draw_io(int x, int y, int n, uint8_t * mem)
+int draw_io(int x, int y, int n, uint8_t* mem)
 {
   int vf = 0;
 
   for (int j = 0; j < n; ++j)
     {
-      int y2 = y + j;
-      uint8_t mem_byte = mem[j];
+      int y2 = (j + y) % height;
+      uint8_t byte = mem[j];
 
       for (int i = 0; i < 8; ++i)
         {
-          int x2 = x + i;
-          uint8_t mem_bit = (mem_byte >> (7-i)) & 0x1;
-          uint8_t old_display_bit = display[X3 + Y3*width];
-          uint8_t new_display_bit = old_display_bit ^ mem_bit;
+          int x2 = (i + x) % width;
+          int bit = (byte & (0x80>>i)) ? 1: 0;
+          int old_pixel = display[x2 + y2*width];
+          int new_pixel = old_pixel ^ bit;
 
-          assert(mem_bit < 2);
-          assert(old_display_bit < 2);
-          assert(new_display_bit < 2);
-
-          display[X3 + Y3*width] = new_display_bit;
-          if (old_display_bit & !new_display_bit)
+          display[x2 + y2*width] = new_pixel;
+          if (old_pixel && bit)
             {
               vf |= 1;
             }
-          mvwaddch(window, Y3+1, X3+1, (new_display_bit? ACS_CKBOARD : ' '));
+          mvwaddch(window, y2+1, x2+1, (new_pixel? ACS_CKBOARD : ' '));
         }
     }
+
   return vf;
 }
 
