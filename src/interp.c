@@ -251,8 +251,10 @@ uint32_t skip_neq_register()
 {
   X; Y;
 
-  if (regs[x] == regs[y])
-    program_counter+=2;
+  if (regs[x] != regs[y])
+    {
+      program_counter+=2;
+    }
   STEP;
 }
 
