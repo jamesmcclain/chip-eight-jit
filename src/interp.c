@@ -26,7 +26,7 @@ int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t op = 0;
 
-#define INPUT_TICKS (30)
+#define INPUT_TICKS (10)
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 
