@@ -26,7 +26,7 @@ int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t op = 0;
 
-#define INPUT_TICKS (30)
+#define INPUT_TICKS (10)
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 
@@ -222,10 +222,12 @@ uint32_t sub_register()
 
 uint32_t shift_right()
 {
-  X; Y;
+  X;
+  /* Y; */
 
   FLAGS = regs[x] & 0x01;
-  regs[x] >>= regs[y];
+  /* regs[x] >>= regs[y]; */
+  regs[x] >>= 1;
   STEP;
 }
 
@@ -240,10 +242,12 @@ uint32_t subn_register()
 
 uint32_t shift_left()
 {
-  X; Y;
+  X;
+  /* Y; */
 
   FLAGS = regs[x] & 0x80;
-  regs[x] <<= regs[y];
+  /* regs[x] <<= regs[y]; */
+  regs[x] <<= 1;
   STEP;
 }
 
@@ -553,7 +557,7 @@ int main(int argc, const char * argv[])
   program_counter = ENTRYPOINT;
   while (1)
     {
-      interrupt();
+      /* interrupt(); */
       if (all_keys_down() & (1<<31))
         {
           break;
