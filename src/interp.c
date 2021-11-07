@@ -553,7 +553,7 @@ int main(int argc, const char * argv[])
   program_counter = ENTRYPOINT;
   while (1)
     {
-      interrupt();
+      /* interrupt(); */
       if (all_keys_down() & (1<<31))
         {
           break;
