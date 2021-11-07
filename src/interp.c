@@ -222,10 +222,12 @@ uint32_t sub_register()
 
 uint32_t shift_right()
 {
-  X; Y;
+  X;
+  /* Y; */
 
   FLAGS = regs[x] & 0x01;
-  regs[x] >>= regs[y];
+  /* regs[x] >>= regs[y]; */
+  regs[x] >>= 1;
   STEP;
 }
 
@@ -240,10 +242,12 @@ uint32_t subn_register()
 
 uint32_t shift_left()
 {
-  X; Y;
+  X;
+  /* Y; */
 
   FLAGS = regs[x] & 0x80;
-  regs[x] <<= regs[y];
+  /* regs[x] <<= regs[y]; */
+  regs[x] <<= 1;
   STEP;
 }
 
