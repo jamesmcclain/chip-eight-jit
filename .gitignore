@@ -3,3 +3,4 @@ roms/
 *.o
 interp
 disas
+hello
