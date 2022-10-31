@@ -9,6 +9,10 @@
 #define FLAGS regs[15]
 #define ENTRYPOINT (0x200)
 
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 extern uint16_t stack[];
 extern uint8_t memory[];
 extern uint8_t regs[];
@@ -21,5 +25,9 @@ extern uint16_t program_counter;
 
 void init_chip8();
 void deinit_chip8();
+
+#if defined(__cplusplus)
+}
+#endif
 
 #endif

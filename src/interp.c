@@ -26,7 +26,7 @@ int8_t delay_timer = 0;
 int8_t sound_timer = 0;
 uint16_t op = 0;
 
-#define INPUT_TICKS (10)
+#define INPUT_TICKS (10) // roughly 1/6 window for input
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 
@@ -576,6 +576,7 @@ int main(int argc, const char * argv[])
     {
       fprintf(stderr, "V%02d = 0x%02X\n", i, regs[i]);
     }
+  fprintf(stderr, "%d instructions executed\n", count);
   fprintf(stderr, "$pc = 0x%04X\n", program_counter);
   fprintf(stderr, "$addr = 0x%04X\n", addr);
   fprintf(stderr, "stack[%d] = 0x%04X\n", stack_pointer, stack[stack_pointer]);

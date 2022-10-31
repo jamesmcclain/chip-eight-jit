@@ -1,6 +1,7 @@
 roms/
 *.asm
 *.o
-interp
-disas
+chip8-interp
+chip8-disas
+chip8-llvm
 hello
