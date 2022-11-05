@@ -102,6 +102,7 @@ int8_t sound_timer = 0;
 uint16_t op = 0;
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
+bool program_over = false;
 
 typedef void (*code)(void);  // function pointer typedef
 std::unique_ptr<std::map<uint16_t, code>> trace_cache;
@@ -315,7 +316,7 @@ extern "C"
 
     if (all_keys & (1<<31))
       {
-        ERROR;
+        program_over = true;
       }
     else
       {
@@ -631,8 +632,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               }
             case 0x0a:
               {
-                JIT_CALL("load_on_keys");
-                continue;
+                JIT_CALL("load_on_key");
+                JIT_DONE; // need to end trace here to check for program exit
               }
             case 0x15:
               { // set_delay_timer
@@ -757,7 +758,7 @@ int main(int argc, const char * argv[])
         }
 
       // If escape or q(uit) has been pressed, exit
-      if (all_keys_down() & (1<<31))
+      if ((all_keys_down() & (1<<31)) || program_over)
         {
           break;
         }
