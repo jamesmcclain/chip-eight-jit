@@ -4,4 +4,3 @@ roms/
 chip8-interp
 chip8-disas
 chip8-llvm
-hello
