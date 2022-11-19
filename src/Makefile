@@ -1,4 +1,4 @@
-CFLAGS ?= -Wall -O0 -ggdb3
+CFLAGS ?= -Wall -O -g
 CC = clang
 CXX = clang++
 

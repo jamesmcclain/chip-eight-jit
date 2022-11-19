@@ -42,6 +42,7 @@
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/Passes/PassBuilder.h"
 
 // ------------------------------------------------------------------------
 
@@ -399,6 +400,18 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   auto linkage = llvm::Function::ExternalLinkage;
   auto function = llvm::Function::Create(fn_type, linkage, fn_name, *module);
 
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager CGAM;
+  llvm::ModuleAnalysisManager MAM;
+  llvm::PassBuilder PB;
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+
   function->getBasicBlockList().push_back(basic_block);
   builder->SetInsertPoint(basic_block);
 
@@ -698,6 +711,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 
   // Generate code
   JIT_RETURN;
+  MPM.run(*module, MAM);
   auto safe_module = llvm::orc::ThreadSafeModule(std::move(module), std::move(context));
   ExitOnErr(JIT->addIRModule(std::move(safe_module)));
 
