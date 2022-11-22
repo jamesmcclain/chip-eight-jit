@@ -192,58 +192,6 @@ extern "C"
       ERROR;
   }
 
-  void skip_eq_immediate()
-  {
-    OP;
-    X;
-    IMMEDIATE8;
-
-    if (regs[x] == immediate)
-      {
-        program_counter+=2;
-      }
-    STEP;
-  }
-
-  void skip_neq_immediate()
-  {
-    OP;
-    X;
-    IMMEDIATE8;
-
-    if (regs[x] != immediate)
-      {
-        program_counter+=2;
-      }
-    STEP;
-  }
-
-  void skip_eq_register()
-  {
-    OP;
-    X;
-    Y;
-
-    if (regs[x] == regs[y])
-      {
-        program_counter+=2;
-      }
-    STEP;
-  }
-
-  void skip_neq_register()
-  {
-    OP;
-    X;
-    Y;
-
-    if (regs[x] != regs[y])
-      {
-        program_counter+=2;
-      }
-    STEP;
-  }
-
   void random_byte()
   {
     OP;
@@ -396,10 +344,10 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   auto module = std::make_unique<llvm::Module>("CHIP-8", *context);
   auto fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*context), {}, false);
   auto builder = std::make_unique<llvm::IRBuilder<>>(*context);
-  auto basic_block = llvm::BasicBlock::Create(*context);
   auto linkage = llvm::Function::ExternalLinkage;
   auto function = llvm::Function::Create(fn_type, linkage, fn_name, *module);
 
+  // https://llvm.org/docs/NewPassManager.html
   llvm::LoopAnalysisManager LAM;
   llvm::FunctionAnalysisManager FAM;
   llvm::CGSCCAnalysisManager CGAM;
@@ -412,12 +360,13 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
 
+  llvm::BasicBlock * basic_block = llvm::BasicBlock::Create(*context);
   function->getBasicBlockList().push_back(basic_block);
   builder->SetInsertPoint(basic_block);
 
-  for(int pc_offset = 0; ; pc_offset+=2)
+  for(uint16_t pc = program_counter; ; pc+=2)
   {
-    op = ntohs(((uint16_t *)memory)[(pc_offset+program_counter)>>1]);
+    op = ntohs(((uint16_t *)memory)[pc>>1]);
 
     if (op == 0x00e0)
       { // clear
@@ -446,20 +395,69 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           JIT_CALL("call");
           JIT_DONE;
         }
-      case 0x3:
+      case 0x3: // skip_eq_immediate
+      case 0x4: // skip_neq_immediate
+      case 0x5: // skip_eq_register
+      case 0x9: // skip_neq_register
         {
-          JIT_CALL("skip_eq_immediate");
-          JIT_DONE;
-        }
-      case 0x4:
-        {
-          JIT_CALL("skip_neq_immediate");
-          JIT_DONE;
-        }
-      case 0x5:
-        {
-          JIT_CALL("skip_eq_register");
-          JIT_DONE;
+          auto two = builder->getInt16(2);
+          auto four = builder->getInt16(4);
+          JIT_GETPTR16(program_counter);
+          JIT_LOAD16(program_counter);
+
+          // Generate comparison
+          auto then_block = llvm::BasicBlock::Create(*context);
+          function->getBasicBlockList().push_back(then_block);
+          auto else_block = llvm::BasicBlock::Create(*context);
+          function->getBasicBlockList().push_back(else_block);
+          llvm::CmpInst::Predicate pred;
+          switch ((op & 0xf000) >> 12)
+            {
+            case 0x3:
+            case 0x5:
+              pred = llvm::CmpInst::Predicate::ICMP_EQ;
+              break;
+            case 0x4:
+            case 0x9:
+              pred = llvm::CmpInst::Predicate::ICMP_NE;
+              break;
+            }
+
+          switch ((op & 0xf000) >> 12)
+            {
+            case 0x3:
+            case 0x4:
+              {
+                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
+                IMMEDIATE8; JIT_IMM8;
+                auto cond = builder->CreateCmp(pred, JIT_VALUE(x), JIT_VALUE(immediate));
+                builder->CreateCondBr(cond, then_block, else_block);
+                break;
+              }
+            case 0x5:
+            case 0x9:
+              {
+                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
+                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
+                auto cond = builder->CreateCmp(pred, JIT_VALUE(x), JIT_VALUE(y));
+                builder->CreateCondBr(cond, then_block, else_block);
+                break;
+              }
+            }
+
+          // "else" (don't skip) block
+          builder->SetInsertPoint(else_block);
+          auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two);
+          builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); // set VM pc
+          JIT_RETURN; // return control
+
+          // "then" (do skip) block
+          basic_block = then_block;
+          builder->SetInsertPoint(basic_block);
+          auto pc_plus_four = builder->CreateAdd(JIT_VALUE(program_counter), four);
+          builder->CreateStore(pc_plus_four, JIT_PTR(program_counter)); // set VM pc
+          pc+=2; // skip next instruction
+          continue; // continue JITing along this path
         }
       case 0x6:
         { // load_immediate
@@ -580,11 +578,6 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             default:
               return errer;
             }
-        }
-      case 0x9:
-        {
-          JIT_CALL("skip_neq_register");
-          JIT_DONE;
         }
       case 0xa: // XXX
         { //load_addr_immediate
