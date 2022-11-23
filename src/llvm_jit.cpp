@@ -93,7 +93,7 @@
   builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); \
   continue;
 #define JIT_RETURN builder->CreateRet(nullptr);
-#define JIT_DONE goto end_of_block;
+#define JIT_DONE goto end_of_trace;
 
 // ------------------------------------------------------------------------
 
@@ -199,7 +199,6 @@ extern "C"
     IMMEDIATE8;
 
     regs[x] = rand() & 0xff & immediate;
-    STEP;
   }
 
   void store_bcd()
@@ -216,7 +215,6 @@ extern "C"
     memory[addr+0] = hundreds;
     memory[addr+1] = tens;
     memory[addr+2] = tmp;
-    STEP;
   }
 
   void skip_key_x(int up)
@@ -289,7 +287,6 @@ extern "C"
       }
     last_tick = current_tick;
     refresh_io();
-    STEP;
   }
 
   void save_registers()
@@ -301,7 +298,6 @@ extern "C"
       {
         memory[addr+i] = regs[i];
       }
-    STEP;
   }
 
   void restore_registers()
@@ -313,7 +309,6 @@ extern "C"
       {
         regs[i] = memory[addr+i];
       }
-    STEP;
   }
 
   void load_sprite_addr()
@@ -422,7 +417,6 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               pred = llvm::CmpInst::Predicate::ICMP_NE;
               break;
             }
-
           switch ((op & 0xf000) >> 12)
             {
             case 0x3:
@@ -579,7 +573,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               return errer;
             }
         }
-      case 0xa: // XXX
+      case 0xa:
         { //load_addr_immediate
           IMMEDIATE12; JIT_IMM16;
           JIT_GETPTR16(addr);
@@ -598,12 +592,12 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
       case 0xc:
         {
           JIT_CALL("random_byte");
-          continue;
+          JIT_STEP;
         }
       case 0xd:
         {
           JIT_CALL("draw");
-          continue;
+          JIT_STEP;
         }
       case 0xe:
         {
@@ -681,17 +675,17 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             case 0x33:
               {
                 JIT_CALL("store_bcd");
-                continue;
+                JIT_STEP;
               }
             case 0x55:
               {
                 JIT_CALL("save_registers");
-                continue;
+                JIT_STEP;
               }
             case 0x65:
               {
                 JIT_CALL("restore_registers");
-                continue;
+                JIT_STEP;
               }
             }
         }
@@ -700,7 +694,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
       }
   }
 
- end_of_block:
+ end_of_trace:
 
   // Generate code
   JIT_RETURN;
