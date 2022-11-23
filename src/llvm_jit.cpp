@@ -359,7 +359,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   function->getBasicBlockList().push_back(basic_block);
   builder->SetInsertPoint(basic_block);
 
-  for(uint16_t pc = program_counter; ; pc+=2)
+  for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
   {
     op = ntohs(((uint16_t *)memory)[pc>>1]);
 
@@ -383,7 +383,15 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           JIT_CALL("interrupt");
           JIT_GETPTR16(program_counter);
           builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(program_counter));
-          JIT_DONE;
+          if ((pc != immediate) && (op_count < (1<<8)))
+            {
+              pc = immediate-2;
+              continue;
+            }
+          else
+            {
+              JIT_DONE;
+            }
         }
       case 0x2:
         {
