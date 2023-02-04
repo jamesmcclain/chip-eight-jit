@@ -1,4 +1,5 @@
 roms/
+*.howto
 *.asm
 *.o
 chip8-interp

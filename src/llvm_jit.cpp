@@ -7,10 +7,6 @@
 
 #include <arpa/inet.h>
 
-#include <string>
-#include <memory>
-#include <map>
-
 #include "chip8.h"
 #include "io.h"
 
@@ -720,6 +716,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 int main(int argc, const char * argv[])
 {
   FILE * fp;
+  int trace_count = 0;
 
   if (argc <= 1)
     {
@@ -771,6 +768,7 @@ int main(int argc, const char * argv[])
         {
           break;
         }
+      trace_count++;
     }
 
   // Deinit CHIP-8
@@ -781,6 +779,7 @@ int main(int argc, const char * argv[])
     {
       fprintf(stderr, "V%02d = 0x%02X\n", i, regs[i]);
     }
+  fprintf(stderr, "%d traces executed\n", trace_count);
   fprintf(stderr, "$pc = 0x%04X\n", program_counter);
   fprintf(stderr, "$addr = 0x%04X\n", addr);
   fprintf(stderr, "stack[%d] = 0x%04X\n", stack_pointer, stack[stack_pointer]);
