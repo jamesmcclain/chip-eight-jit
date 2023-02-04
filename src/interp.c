@@ -535,7 +535,7 @@ uint32_t basic_block()
 int main(int argc, const char * argv[])
 {
   FILE * fp;
-  int count = 0;
+  int inst_count = 0;
 
   if (argc <= 1)
     {
@@ -566,7 +566,7 @@ int main(int argc, const char * argv[])
         {
           break;
         }
-      count++;
+      inst_count++;
     }
 
   deinit_io();
@@ -576,7 +576,7 @@ int main(int argc, const char * argv[])
     {
       fprintf(stderr, "V%02d = 0x%02X\n", i, regs[i]);
     }
-  fprintf(stderr, "%d instructions executed\n", count);
+  fprintf(stderr, "%d chip-8 instructions executed\n", inst_count);
   fprintf(stderr, "$pc = 0x%04X\n", program_counter);
   fprintf(stderr, "$addr = 0x%04X\n", addr);
   fprintf(stderr, "stack[%d] = 0x%04X\n", stack_pointer, stack[stack_pointer]);

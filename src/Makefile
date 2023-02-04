@@ -15,7 +15,7 @@ chip8-disas: disas.o
 	$(CC) $^ $(LDFLAGS) -o $@
 
 llvm_jit.o: llvm_jit.cpp
-	$(CXX) $(CFLAGS) $(shell llvm-config --cxxflags) $< -c -o $@
+	$(CXX) $(CFLAGS) $(CXXFLAGS) $(shell llvm-config --cxxflags) $< -c -o $@
 
 %.o: %.c %.h
 	$(CC) $(CFLAGS) $< -c -o $@
