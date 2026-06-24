@@ -110,7 +110,7 @@ uint32_t call()
   IMMEDIATE12;
 
   interrupt();
-  if (stack_pointer + 1 < STACK_SIZE)
+  if (stack_pointer < STACK_SIZE)
     {
       stack[stack_pointer++] = program_counter + 2;
       program_counter = immediate;
@@ -245,7 +245,7 @@ uint32_t shift_left()
   X;
   /* Y; */
 
-  FLAGS = regs[x] & 0x80;
+  FLAGS = (regs[x] & 0x80) ? 1 : 0;
   /* regs[x] <<= regs[y]; */
   regs[x] <<= 1;
   STEP;

@@ -5,3 +5,4 @@ roms/
 chip8-interp
 chip8-disas
 chip8-llvm
+chip8-libgccjit

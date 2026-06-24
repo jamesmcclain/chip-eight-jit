@@ -66,13 +66,13 @@
 
 #define JIT_GETPTR16(var) \
   auto JIT_LOC(var) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint16_t *)*8, reinterpret_cast<uint64_t>(&var), false)); \
-  auto JIT_PTR(var) = builder->CreateIntToPtr(JIT_LOC(var), llvm::Type::getInt16PtrTy(*context));
+  auto JIT_PTR(var) = builder->CreateIntToPtr(JIT_LOC(var), llvm::PointerType::getUnqual(*context));
 #define JIT_LOAD16(var) \
   auto JIT_VALUE(var) = builder->CreateLoad(llvm::Type::getInt16Ty(*context), JIT_PTR(var));
 
 #define JIT_GETPTRREG(x) \
   auto JIT_LOC(x) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&(regs[x])), false)); \
-  auto JIT_PTR(x) = builder->CreateIntToPtr(JIT_LOC(x), llvm::Type::getInt8PtrTy(*context));
+  auto JIT_PTR(x) = builder->CreateIntToPtr(JIT_LOC(x), llvm::PointerType::getUnqual(*context));
 #define JIT_LOADREG(x) \
   auto JIT_VALUE(x) = builder->CreateLoad(llvm::Type::getInt8Ty(*context), JIT_PTR(x));
 
@@ -179,7 +179,7 @@ extern "C"
     IMMEDIATE12;
 
     interrupt();
-    if (stack_pointer + 1 < STACK_SIZE)
+    if (stack_pointer < STACK_SIZE)
       {
         stack[stack_pointer++] = program_counter + 2;
         program_counter = immediate;
@@ -351,8 +351,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
 
-  llvm::BasicBlock * basic_block = llvm::BasicBlock::Create(*context);
-  function->getBasicBlockList().push_back(basic_block);
+  llvm::BasicBlock * basic_block = llvm::BasicBlock::Create(*context, "", function);
   builder->SetInsertPoint(basic_block);
 
   for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
@@ -405,11 +404,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           JIT_LOAD16(program_counter);
 
           // Generate comparison
-          auto then_block = llvm::BasicBlock::Create(*context);
-          function->getBasicBlockList().push_back(then_block);
-          auto else_block = llvm::BasicBlock::Create(*context);
-          function->getBasicBlockList().push_back(else_block);
-          llvm::CmpInst::Predicate pred;
+          auto then_block = llvm::BasicBlock::Create(*context, "", function);
+          auto else_block = llvm::BasicBlock::Create(*context, "", function);
+          llvm::CmpInst::Predicate pred = llvm::CmpInst::Predicate::ICMP_EQ;
           switch ((op & 0xf000) >> 12)
             {
             case 0x3:
@@ -514,8 +511,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 int f = 0xf; JIT_GETPTRREG(f); // flags
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto x16_value = builder->CreateCast(llvm::CastInst::getCastOpcode(JIT_VALUE(x), true, int16ty, true), JIT_VALUE(x), int16ty);
-                auto y16_value = builder->CreateCast(llvm::CastInst::getCastOpcode(JIT_VALUE(y), true, int16ty, true), JIT_VALUE(y), int16ty);
+                auto x16_value = builder->CreateZExt(JIT_VALUE(x), int16ty);
+                auto y16_value = builder->CreateZExt(JIT_VALUE(y), int16ty);
                 auto eff_eff = builder->getInt16(0xff);
                 auto sum16_value = builder->CreateAdd(x16_value, y16_value);
                 auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_SGT, sum16_value, eff_eff);
@@ -568,7 +565,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 int f = 0xf; JIT_GETPTRREG(f);
                 auto andeight_value = builder->CreateAnd(JIT_VALUE(x), 0x80);
-                builder->CreateStore(andeight_value, JIT_PTR(f));
+                auto msb_value = builder->CreateLShr(andeight_value, 7);
+                builder->CreateStore(msb_value, JIT_PTR(f));
                 auto shl_value = builder->CreateShl(JIT_VALUE(x), 1);
                 builder->CreateStore(shl_value, JIT_PTR(x));
                 JIT_STEP;
@@ -629,7 +627,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               { // get_delay_timer
                 X; JIT_GETPTRREG(x);
                 auto JIT_LOC(delay_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&delay_timer), false));
-                auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::Type::getInt8PtrTy(*context));
+                auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::PointerType::getUnqual(*context));
                 auto JIT_VALUE(delay_timer) = builder->CreateLoad(llvm::Type::getInt8Ty(*context), JIT_PTR(delay_timer));
                 builder->CreateStore(JIT_VALUE(delay_timer), JIT_PTR(x));
                 JIT_STEP;
@@ -643,7 +641,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               { // set_delay_timer
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 auto JIT_LOC(delay_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&delay_timer), false));
-                auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::Type::getInt8PtrTy(*context));
+                auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::PointerType::getUnqual(*context));
                 builder->CreateStore(JIT_VALUE(x), JIT_PTR(delay_timer));
                 JIT_STEP;
               }
@@ -651,7 +649,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               { // set_sound_timer
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 auto JIT_LOC(sound_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&sound_timer), false));
-                auto JIT_PTR(sound_timer) = builder->CreateIntToPtr(JIT_LOC(sound_timer), llvm::Type::getInt8PtrTy(*context));
+                auto JIT_PTR(sound_timer) = builder->CreateIntToPtr(JIT_LOC(sound_timer), llvm::PointerType::getUnqual(*context));
                 builder->CreateStore(JIT_VALUE(x), JIT_PTR(sound_timer));
                 JIT_STEP;
               }
@@ -660,7 +658,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 auto int16ty = llvm::Type::getInt16Ty(*context);
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 JIT_GETPTR16(addr); JIT_LOAD16(addr);
-                auto x16_value = builder->CreateCast(llvm::CastInst::getCastOpcode(JIT_VALUE(x), true, int16ty, true), JIT_VALUE(x), int16ty);
+                auto x16_value = builder->CreateZExt(JIT_VALUE(x), int16ty);
                 auto sum_value = builder->CreateAdd(JIT_VALUE(addr), x16_value);
                 builder->CreateStore(sum_value, JIT_PTR(addr));
                 JIT_STEP;
@@ -671,7 +669,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 JIT_GETPTR16(addr);
                 auto five_value = builder->getInt16(5);
-                auto x16_value = builder->CreateCast(llvm::CastInst::getCastOpcode(JIT_VALUE(x), true, int16ty, true), JIT_VALUE(x), int16ty);
+                auto x16_value = builder->CreateZExt(JIT_VALUE(x), int16ty);
                 auto prod_value = builder->CreateMul(x16_value, five_value);
                 builder->CreateStore(prod_value, JIT_PTR(addr));
                 JIT_STEP;
@@ -708,7 +706,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 
   // Return generated code
   auto sym = ExitOnErr(JIT->lookup(fn_name));
-  return reinterpret_cast<code>(sym.getAddress());
+  return sym.toPtr<code>();
 }
 
 // ------------------------------------------------------------------------
