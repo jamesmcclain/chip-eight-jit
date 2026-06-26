@@ -40,6 +40,9 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Passes/PassBuilder.h"
 
+#include <map>
+#include <vector>
+
 // ------------------------------------------------------------------------
 
 #define ERROR {errer();}
@@ -103,6 +106,7 @@ bool program_over = false;
 
 typedef void (*code)(void);  // function pointer typedef
 std::unique_ptr<std::map<uint16_t, code>> trace_cache;
+std::vector<llvm::orc::ResourceTrackerSP> trace_resources;
 llvm::ExitOnError ExitOnErr;
 
 // ------------------------------------------------------------------------
@@ -704,11 +708,30 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   JIT_RETURN;
   MPM.run(*module, MAM);
   auto safe_module = llvm::orc::ThreadSafeModule(std::move(module), std::move(context));
-  ExitOnErr(JIT->addIRModule(std::move(safe_module)));
+  auto RT = JIT->getMainJITDylib().createResourceTracker();
+  ExitOnErr(JIT->addIRModule(RT, std::move(safe_module)));
+  trace_resources.push_back(RT);
 
   // Return generated code
   auto sym = ExitOnErr(JIT->lookup(fn_name));
   return sym.toPtr<code>();
+}
+
+// ------------------------------------------------------------------------
+
+void teardown_jit(std::unique_ptr<llvm::orc::LLJIT> & JIT)
+{
+  for (auto & RT : trace_resources)
+    {
+      ExitOnErr(RT->remove());
+    }
+  trace_resources.clear();
+  if (trace_cache)
+    {
+      trace_cache->clear();
+      trace_cache.reset();
+    }
+  JIT.reset();
 }
 
 // ------------------------------------------------------------------------
@@ -786,5 +809,7 @@ int main(int argc, const char * argv[])
   fprintf(stderr, "delay = %d\n", delay_timer);
   fprintf(stderr, "sound = %d\n", sound_timer);
 
-  exit(0);
+  teardown_jit(TheJIT);
+
+  return 0;
 }
