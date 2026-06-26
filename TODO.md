@@ -7,12 +7,12 @@ deliberately omitted.
 
 ## Correctness
 
-- [ ] **LLVM `Bnnn` type mismatch.** `llvm_jit.cpp` (case `0xb`) adds the 16-bit
+- [x] **LLVM `Bnnn` type mismatch.** `llvm_jit.cpp` (case `0xb`) adds the 16-bit
       immediate to the 8-bit `V0` value directly, producing a wrong (often odd)
       jump target. The libgccjit backend zero-extends `V0` first and is correct;
       port that fix back to the LLVM backend. Reproduces with any ROM that uses
       `Bnnn`.
-- [ ] **Odd program counters are misread.** Opcode fetch is
+- [x] **Odd program counters are misread.** Opcode fetch is
       `((uint16_t *)memory)[pc >> 1]`, which assumes 2-byte alignment. A jump or
       call to an odd address silently fetches a misaligned opcode instead of
       faulting. Affects all backends.
