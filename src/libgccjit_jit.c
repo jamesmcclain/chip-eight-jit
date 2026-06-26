@@ -17,7 +17,7 @@
 
 #define X uint8_t x = (op >> 8) & 0xf
 #define Y uint8_t y = (op >> 4) & 0xf
-#define OP_AT(pc) (ntohs(((uint16_t *)memory)[(pc)>>1]))
+#define OP_AT(pc) (OPCODE_AT(pc))
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff

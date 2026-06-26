@@ -9,6 +9,10 @@
 #define FLAGS regs[15]
 #define ENTRYPOINT (0x200)
 
+#define OPCODE_AT(pc)                                       \
+  ((uint16_t)((memory[(pc) & (MEMORY_SIZE - 1)] << 8) |     \
+              memory[((pc) + 1) & (MEMORY_SIZE - 1)]))
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
