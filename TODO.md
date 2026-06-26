@@ -23,9 +23,17 @@ deliberately omitted.
       entry PC and never invalidated, so writes into a code region (e.g. via
       `Fx55`) are not reflected in already-compiled traces. The interpreter
       handles SMC correctly because it re-decodes every instruction.
-- [ ] **Compiled code is intentionally leaked.** LLVM modules and libgccjit
+- [x] **Compiled code is intentionally leaked.** ~~LLVM modules and libgccjit
       `gcc_jit_result`s are never released and there is no JIT teardown. Fine for
-      short runs; grows unbounded for long-lived or SMC-heavy programs.
+      short runs; grows unbounded for long-lived or SMC-heavy programs.~~
+      *Fixed.* Each backend now tracks the resources behind every compiled trace
+      (an ORC `ResourceTracker` per IR module in `llvm_jit.cpp`, the owning
+      `gcc_jit_result` in `libgccjit_jit.c`) and releases them in a `teardown_jit`
+      step on the normal exit path, which also drops the LLJIT itself. The run
+      loop replaces its `exit(0)` with teardown + `return 0` so the teardown
+      actually runs. This bounds the steady-state leak to whatever traces are
+      currently cached; reclaiming superseded traces during a run is the separate
+      SMC item above.
 
 ## Semantics / quirks
 
@@ -42,8 +50,20 @@ deliberately omitted.
 
 ## Maintainability
 
-- [ ] **Triplicated opcode semantics.** The per-opcode behavior now lives in three
+- [x] **Triplicated opcode semantics.** The per-opcode behavior lives in three
       places: `interp.c`, and the host-helper layers of `llvm_jit.cpp` and
       `libgccjit_jit.c`. Behavioral fixes must be made in all three (this is how
       the shift-left and call bugs survived into the libgccjit scaffold).
-      Consider sharing a single set of helper routines.
+      *Decision: won't fix.* Checked off as deliberately accepted, not resolved.
+      The three layers are not actually interchangeable -- the interpreter walks
+      one instruction at a time, while the JIT host helpers exist precisely
+      because those opcodes are awkward to express as inline IR and re-read their
+      own opcode from memory under a different control-flow contract. Hoisting
+      them into a single shared helper set would couple the calling conventions
+      of three engines for the handful of opcodes that already have the clearest,
+      most localized semantics, and the straight-line opcodes (the ones most
+      prone to silent divergence) can't be shared at all because each backend
+      emits them as native IR rather than calls. The maintenance cost is a small,
+      well-understood set of helpers; we accept it rather than take on a riskier
+      abstraction. Revisit only if a fourth backend appears or the helper set
+      grows substantially.

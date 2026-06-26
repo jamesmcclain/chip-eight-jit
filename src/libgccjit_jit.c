@@ -295,6 +295,41 @@ host_fn(gcc_jit_function **tbl, const char *name)
   return NULL; // unreachable for the names used below
 }
 
+static gcc_jit_result **trace_results = NULL;
+static size_t n_trace_results = 0;
+static size_t cap_trace_results = 0;
+
+static void remember_result(gcc_jit_result *result)
+{
+  if (n_trace_results == cap_trace_results)
+    {
+      size_t cap = cap_trace_results ? cap_trace_results * 2 : 64;
+      gcc_jit_result **grown = realloc(trace_results, cap * sizeof(*grown));
+      if (grown == NULL)
+        {
+          // Out of memory growing the bookkeeping list: we cannot track this
+          // result for later release, but dropping the program is worse than
+          // leaking one result, so keep running.
+          return;
+        }
+      trace_results = grown;
+      cap_trace_results = cap;
+    }
+  trace_results[n_trace_results++] = result;
+}
+
+static void teardown_jit(void)
+{
+  for (size_t i = 0; i < n_trace_results; ++i)
+    {
+      gcc_jit_result_release(trace_results[i]);
+    }
+  free(trace_results);
+  trace_results = NULL;
+  n_trace_results = 0;
+  cap_trace_results = 0;
+}
+
 // ------------------------------------------------------------------------
 // Compile a single trace beginning at program_counter and return a pointer
 // to the native code. Straight-line opcodes are emitted inline; the trace is
@@ -657,7 +692,13 @@ code codegen(void)
   if (!result)
     return errer;
   code fn = (code)gcc_jit_result_get_code(result, fn_name);
-  return fn ? fn : errer;
+  if (!fn)
+    {
+      gcc_jit_result_release(result);
+      return errer;
+    }
+  remember_result(result); // hold the result so teardown can free its code
+  return fn;
 
   #undef PC_LVAL
   #undef STEP_AND_CONTINUE
@@ -726,5 +767,7 @@ int main(int argc, const char * argv[])
   fprintf(stderr, "delay = %d\n", delay_timer);
   fprintf(stderr, "sound = %d\n", sound_timer);
 
-  exit(0);
+  teardown_jit();
+
+  return 0;
 }
