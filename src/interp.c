@@ -424,7 +424,7 @@ uint32_t load_sprite_addr()
 
 uint32_t basic_block()
 {
-  op = ntohs(((uint16_t *)memory)[program_counter>>1]);
+  op = OPCODE_AT(program_counter);
 
   if (op == 0x00e0)
     {

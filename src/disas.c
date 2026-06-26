@@ -251,7 +251,8 @@ uint32_t load_sprite_addr()
 
 uint32_t basic_block()
 {
-  op = ntohs(((uint16_t *)memory)[program_counter>>1]);
+  op = (uint16_t)((memory[program_counter & (MEMORY_SIZE - 1)] << 8) |
+                  memory[(program_counter + 1) & (MEMORY_SIZE - 1)]);
 
   if (op == 0)
     {

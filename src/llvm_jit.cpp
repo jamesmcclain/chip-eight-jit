@@ -46,7 +46,7 @@
 #define STEP {program_counter+=2;}
 #define X uint8_t x = (op >> 8) & 0xf
 #define Y uint8_t y = (op >> 4) & 0xf
-#define OP uint16_t op = ntohs(((uint16_t *)memory)[program_counter>>1]);
+#define OP uint16_t op = OPCODE_AT(program_counter);
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
@@ -356,7 +356,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 
   for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
   {
-    op = ntohs(((uint16_t *)memory)[pc>>1]);
+    op = OPCODE_AT(pc);
 
     if (op == 0x00e0)
       { // clear
@@ -587,7 +587,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           int z = 0; JIT_GETPTRREG(z); JIT_LOADREG(z);
           IMMEDIATE12; JIT_IMM16;
           JIT_GETPTR16(program_counter);
-          auto pc_value = builder->CreateAdd(JIT_VALUE(immediate), JIT_VALUE(z));
+          auto int16ty = llvm::Type::getInt16Ty(*context);
+          auto z16_value = builder->CreateZExt(JIT_VALUE(z), int16ty);
+          auto pc_value = builder->CreateAdd(JIT_VALUE(immediate), z16_value);
           builder->CreateStore(pc_value, JIT_PTR(program_counter));
           JIT_DONE;
         }
