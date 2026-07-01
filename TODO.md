@@ -67,3 +67,104 @@ deliberately omitted.
       well-understood set of helpers; we accept it rather than take on a riskier
       abstraction. Revisit only if a fourth backend appears or the helper set
       grows substantially.
+
+## Correctness
+
+- [ ] **`clear_key` erases the quit bit (and all high bits).** In all three
+      engines, `clear_key` does `keys_down[i] &= (0xffff ^ (1<<key))`. For any
+      `key < 16` the mask's upper 16 bits are zero, so the AND wipes bits
+      16-31 of every slot -- including the `1<<31` "quit" flag. Pressing a
+      CHIP-8 key that gets consumed by `Ex9E/ExA1/Fx0A` can silently cancel a
+      pending `q`/Escape. The mask should be `~(1u << key)`.
+- [ ] **Timers are `int8_t` and can get stuck.** `delay_timer`/`sound_timer`
+      are signed 8-bit, but `Fx15/Fx18` load them from a full 8-bit register.
+      Setting a timer to any value > 127 stores a negative number; `interrupt()`
+      only decrements when `> 0`, so the timer never counts down and a ROM
+      spin-waiting on `Fx07 == 0` hangs forever. Make the timers `uint8_t`
+      (and adjust the `> 0` checks / stderr dump accordingly).
+- [ ] **Unbounded `addr` allows out-of-bounds memory access.** `Annn` sets
+      `addr` up to 0xFFF and `Fx1E` can push it to 0xFFFE, but `store_bcd`,
+      `save_registers`, `restore_registers`, and `draw` index `memory[addr+i]`
+      with no mask or bounds check (only opcode fetch uses `OPCODE_AT`'s
+      masking). A hostile or buggy ROM can read/write past the 4 KiB `memory`
+      array -- a real out-of-bounds write in the host process. Mask with
+      `(MEMORY_SIZE - 1)` or clamp. Affects the interpreter and both JIT
+      host-helper layers.
+- [ ] **LLVM `8xy5` writes result before flag (divergence).** In
+      `llvm_jit.cpp`, `sub_register` stores the difference to `Vx` *first* and
+      the borrow flag to `VF` *second* -- the opposite order from the
+      interpreter and the libgccjit backend. When `x == 0xF`, the LLVM engine
+      leaves the flag in `VF` while the other two leave the result. This
+      contradicts the "preserved identically across all three engines" claim
+      in the `VF`-as-destination item above; pick one order and align all
+      three.
+- [ ] **`fopen` result is never checked.** All four `main`s call
+      `fopen(argv[1], "r")` and pass the result straight to `fread` --
+      a missing ROM path segfaults before any diagnostic. Check for `NULL`
+      and print a usable error. (Related to, but distinct from, the existing
+      "ignored `fread` result" item: `libgccjit_jit.c` checks `fread` but
+      still not `fopen`.) Also open with `"rb"` for portability.
+- [ ] **`disas.c` error format string is malformed.** `#define ERROR
+      fprintf(stdout, "op code %0x04X\n", op)` -- `%0x` consumes `op` and the
+      `04X` prints literally (e.g. `op code ab04X`). Should be `%04X`. The
+      unknown-opcode path also doesn't print the PC.
+
+## Semantics / quirks
+
+- [ ] **`8xy5/8xy7` borrow flag on equality.** All three engines set
+      `VF = (Vx > Vy)` (strict), so `Vx == Vy` yields `VF = 0`. The
+      conventional semantics is "VF = NOT borrow", i.e. `Vx >= Vy` sets
+      `VF = 1`. Most test ROMs (e.g. the Timendus quirks suite) expect the
+      `>=` behavior; verify against one and fix or document.
+- [ ] **`Dxyn` wraps sprites instead of clipping.** `draw_io` applies
+      `% width` / `% height` per pixel, so sprites that run off the right or
+      bottom edge wrap around. The common quirk expectation is: wrap the
+      *starting* coordinate, then clip the sprite at the edges. Decide which
+      behavior is intended and note it in the README.
+- [ ] **`8xy6/8xyE` ignore `Vy`.** The interpreter has the `Vy` variants
+      commented out and both JITs shift `Vx` in place (the "modern"/SCHIP
+      quirk). Fine as a choice, but it's undocumented; add a quirks section
+      to the README so ROM incompatibilities are explainable.
+
+## JIT robustness
+
+- [ ] **Failed codegen leaks and is cached as `errer`.** On an unknown opcode,
+      `llvm_jit.cpp`'s `codegen` returns the host `errer` function mid-build,
+      abandoning the partially built module/context (the libgccjit backend at
+      least releases its context in `BAIL_ERRER`). In both backends the
+      returned `errer` pointer is then stored in the trace cache as if it were
+      a compiled trace. Consider failing more loudly at compile time instead
+      of deferring to a cached crash-on-execute stub.
+- [ ] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
+      instruction.** When quit is pressed during a blocked key wait, both JIT
+      helpers set `program_over` without stepping the PC, while the
+      interpreter reports it via `ERROR` with a different exit status/message.
+      Harmless, but the three engines' final register/PC dumps differ for the
+      same input; worth unifying if the dumps are used for cross-checking.
+
+## Build hygiene
+
+- [ ] **Header dependencies aren't tracked.** The pattern rule
+      `%.o: %.c %.h` only fires when a same-named header exists
+      (`chip8.o`, `ncurses_io.o` -- and the latter matches `io.h` not at all:
+      `ncurses_io.h` doesn't exist, so it falls back to the built-in rule).
+      `interp.o`, `disas.o`, and the JIT objects don't rebuild when `chip8.h`
+      or `io.h` change, which is exactly the kind of stale-build that hides
+      cross-engine divergence. Use `-MMD -MP` generated deps or list headers
+      explicitly.
+- [ ] **Dead/unused includes and warnings.** `arpa/inet.h` and `signal.h` are
+      included in all engines but unused (likely leftovers from an
+      `htons`-based fetch). `io.h` uses `uint8_t`/`uint32_t` without including
+      `<stdint.h>` itself, so it only compiles because every includer happens
+      to pull `chip8.h` first. Compiling with `-Wextra` also flags a few
+      sign-comparison nits worth cleaning.
+
+## Cosmetics / consistency
+
+- [ ] **Register dump prints decimal indices.** `V%02d` in every engine's exit
+      dump prints `V10`..`V15` instead of `VA`..`VF`; `disas.c` similarly
+      prints `V%d`. Hex register names would match every CHIP-8 reference.
+- [ ] **Exit dumps differ across engines.** The libgccjit backend omits the
+      `stack[...]` line the other two print; the interpreter's
+      `stack[stack_pointer]` also reads one slot past the top of stack
+      (index equals the count, not the last pushed entry).
