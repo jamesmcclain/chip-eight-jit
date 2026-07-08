@@ -56,6 +56,7 @@
 #define NANOS_PER_TICK (16666666) // ~60 Hz clock
 #define TICKS_PER_SECOND (60) // ~60 Hz clock
 #define INPUT_TICKS (10) // roughly 1/6 second window for input
+#define SAFEPOINT_INTERVAL (32) // straight-line ops between emitted safepoints
 
 // ------------------------------------------------------------------------
 
@@ -94,6 +95,27 @@
 #define JIT_RETURN builder->CreateRet(nullptr);
 #define JIT_DONE goto end_of_trace;
 
+// Emit a lightweight safepoint: a volatile load of interrupt_pending and a
+// conditional call to check_interrupt(). The fast (flag clear) path is a
+// single load-and-branch, so these can be sprinkled liberally through traces
+// without hurting throughput; the slow path services timers and input.
+#define JIT_SAFEPOINT \
+  { \
+    auto int32ty_sp = llvm::Type::getInt32Ty(*context); \
+    auto flag_loc = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(void *)*8, reinterpret_cast<uint64_t>(&interrupt_pending), false)); \
+    auto flag_ptr = builder->CreateIntToPtr(flag_loc, llvm::PointerType::getUnqual(*context)); \
+    auto flag_value = builder->CreateLoad(int32ty_sp, flag_ptr, true /* volatile */); \
+    auto pending = builder->CreateICmpNE(flag_value, llvm::ConstantInt::get(int32ty_sp, 0)); \
+    auto slow_block = llvm::BasicBlock::Create(*context, "", function); \
+    auto cont_block = llvm::BasicBlock::Create(*context, "", function); \
+    builder->CreateCondBr(pending, slow_block, cont_block); \
+    builder->SetInsertPoint(slow_block); \
+    { JIT_CALL("check_interrupt"); } \
+    builder->CreateBr(cont_block); \
+    basic_block = cont_block; \
+    builder->SetInsertPoint(basic_block); \
+  }
+
 // ------------------------------------------------------------------------
 
 int last_tick = 0;
@@ -103,6 +125,49 @@ uint16_t op = 0;
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 bool program_over = false;
+
+// Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
+// INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
+// is not async-signal-safe, so the actual polling happens synchronously in
+// check_interrupt() at safepoints emitted into the JITed traces).
+volatile sig_atomic_t interrupt_pending = 0;
+static_assert(sizeof(sig_atomic_t) == sizeof(int32_t),
+              "JIT_SAFEPOINT emits a 32-bit load of interrupt_pending");
+static timer_t interrupt_timer;
+
+static void alarm_handler(int signum)
+{
+  (void)signum;
+  interrupt_pending = 1;
+}
+
+static void init_interrupt_timer()
+{
+  struct sigaction sa;
+  struct sigevent sev;
+  struct itimerspec its;
+
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = alarm_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGALRM, &sa, NULL);
+
+  memset(&sev, 0, sizeof(sev));
+  sev.sigev_notify = SIGEV_SIGNAL;
+  sev.sigev_signo = SIGALRM;
+  timer_create(CLOCK_MONOTONIC, &sev, &interrupt_timer);
+
+  its.it_interval.tv_sec = 0;
+  its.it_interval.tv_nsec = NANOS_PER_TICK / INPUT_TICKS;
+  its.it_value = its.it_interval;
+  timer_settime(interrupt_timer, 0, &its, NULL);
+}
+
+static void deinit_interrupt_timer()
+{
+  timer_delete(interrupt_timer);
+}
 
 typedef void (*code)(void);  // function pointer typedef
 std::unique_ptr<std::map<uint16_t, code>> trace_cache;
@@ -160,6 +225,18 @@ extern "C"
     interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
   }
 
+  // Slow path of a safepoint: service timers and input iff the asynchronous
+  // timer has fired since the last check. Cheap enough to call from the
+  // dispatch loop and from any host helper.
+  void check_interrupt()
+  {
+    if (interrupt_pending)
+      {
+        interrupt_pending = 0;
+        interrupt();
+      }
+  }
+
   void errer()
   {
     fprintf(stderr, "Error: op=%04x pc=%04x\n", op, program_counter);
@@ -168,7 +245,7 @@ extern "C"
 
   void retern()
   {
-    interrupt();
+    check_interrupt();
     if (stack_pointer > 0)
       {
         program_counter = stack[--stack_pointer];
@@ -182,7 +259,7 @@ extern "C"
     OP;
     IMMEDIATE12;
 
-    interrupt();
+    check_interrupt();
     if (stack_pointer < STACK_SIZE)
       {
         stack[stack_pointer++] = program_counter + 2;
@@ -279,7 +356,7 @@ extern "C"
     IMMEDIATE4;
     int current_tick;
 
-    interrupt();
+    check_interrupt();
     FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
     while((current_tick = tick()) == last_tick)
       {
@@ -362,6 +439,13 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   {
     op = OPCODE_AT(pc);
 
+    // Periodic safepoint: bound the number of straight-line (or taken-skip)
+    // instructions that can execute between input/timer checks.
+    if ((op_count != 0) && ((op_count % SAFEPOINT_INTERVAL) == 0))
+      {
+        JIT_SAFEPOINT;
+      }
+
     if (op == 0x00e0)
       { // clear
         JIT_CALL("clearscreen_io");
@@ -379,7 +463,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
       case 0x1:
         { // jump
           IMMEDIATE12; JIT_IMM16;
-          JIT_CALL("interrupt");
+          JIT_SAFEPOINT;
           JIT_GETPTR16(program_counter);
           builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(program_counter));
           if ((pc != immediate) && (op_count < (1<<8)))
@@ -756,6 +840,7 @@ int main(int argc, const char * argv[])
   last_tick = tick();
   init_chip8();
   init_io(64, 32);
+  init_interrupt_timer();
 
   // Initialize LLVM
   llvm::InitializeNativeTarget();
@@ -786,6 +871,10 @@ int main(int argc, const char * argv[])
           it->second();
         }
 
+      // Service any pending timer/input interrupt between traces; this also
+      // keeps keys fresh for ROMs that spin on skip_key traces.
+      check_interrupt();
+
       // If escape or q(uit) has been pressed, exit
       if ((all_keys_down() & (1<<31)) || program_over)
         {
@@ -795,6 +884,7 @@ int main(int argc, const char * argv[])
     }
 
   // Deinit CHIP-8
+  deinit_interrupt_timer();
   deinit_io();
   deinit_chip8();
 

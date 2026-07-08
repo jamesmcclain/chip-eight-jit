@@ -17,6 +17,14 @@ Both JITs compile one native function per entry PC, cache it, and extend traces
 across unconditional jumps and the taken side of skips; awkward opcodes (control
 flow, I/O, blocking input) are emitted as calls to shared C helper routines.
 
+Timers and input in the JIT backends are driven asynchronously: a POSIX
+interval timer raises `SIGALRM` several hundred times a second and its handler
+sets a flag; compiled traces contain lightweight safepoints (a volatile load
+plus a conditional call) at jump back-edges and every 32 straight-line
+instructions, which service the flag by polling the keyboard and decrementing
+the 60 Hz timers. This bounds input latency regardless of the shape of the
+compiled code.
+
 ## Build
 
 Requirements: `gcc`/`g++`, LLVM 20 development files (`llvm-config-20`),

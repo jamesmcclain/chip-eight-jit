@@ -24,6 +24,7 @@
 #define NANOS_PER_TICK (16666666) // ~60 Hz clock
 #define TICKS_PER_SECOND (60) // ~60 Hz clock
 #define INPUT_TICKS (10) // roughly 1/6 second window for input
+#define SAFEPOINT_INTERVAL (32) // straight-line ops between emitted safepoints
 
 // ------------------------------------------------------------------------
 // VM bookkeeping state owned by this backend (chip8.c owns the rest)
@@ -35,6 +36,47 @@ uint16_t op = 0;
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 int program_over = 0;
+
+// Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
+// INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
+// is not async-signal-safe, so the actual polling happens synchronously in
+// check_interrupt() at safepoints emitted into the JITed traces).
+volatile sig_atomic_t interrupt_pending = 0;
+static timer_t interrupt_timer;
+
+static void alarm_handler(int signum)
+{
+  (void)signum;
+  interrupt_pending = 1;
+}
+
+static void init_interrupt_timer(void)
+{
+  struct sigaction sa;
+  struct sigevent sev;
+  struct itimerspec its;
+
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = alarm_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGALRM, &sa, NULL);
+
+  memset(&sev, 0, sizeof(sev));
+  sev.sigev_notify = SIGEV_SIGNAL;
+  sev.sigev_signo = SIGALRM;
+  timer_create(CLOCK_MONOTONIC, &sev, &interrupt_timer);
+
+  its.it_interval.tv_sec = 0;
+  its.it_interval.tv_nsec = NANOS_PER_TICK / INPUT_TICKS;
+  its.it_value = its.it_interval;
+  timer_settime(interrupt_timer, 0, &its, NULL);
+}
+
+static void deinit_interrupt_timer(void)
+{
+  timer_delete(interrupt_timer);
+}
 
 typedef void (*code)(void); // pointer to a compiled trace
 
@@ -97,6 +139,19 @@ void interrupt()
   interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
 }
 
+// Slow path of a safepoint: service timers and input iff the asynchronous
+// timer has fired since the last check. Cheap enough to call from the
+// dispatch loop and from any host helper. Must stay visible in the dynamic
+// symbol table (see HOST_FNS) so JITed traces can call it.
+void check_interrupt()
+{
+  if (interrupt_pending)
+    {
+      interrupt_pending = 0;
+      interrupt();
+    }
+}
+
 void errer()
 {
   fprintf(stderr, "Error: op=%04x pc=%04x\n", op, program_counter);
@@ -105,7 +160,7 @@ void errer()
 
 void retern()
 {
-  interrupt();
+  check_interrupt();
   if (stack_pointer > 0)
     {
       program_counter = stack[--stack_pointer];
@@ -119,7 +174,7 @@ void call()
   op = OP_AT(program_counter);
   IMMEDIATE12;
 
-  interrupt();
+  check_interrupt();
   if (stack_pointer < STACK_SIZE)
     {
       stack[stack_pointer++] = program_counter + 2;
@@ -216,7 +271,7 @@ void draw()
   IMMEDIATE4;
   int current_tick;
 
-  interrupt();
+  check_interrupt();
   FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
   while((current_tick = tick()) == last_tick)
     {
@@ -280,7 +335,7 @@ snapshot(gcc_jit_context *ctx, gcc_jit_function *fn, gcc_jit_block *blk,
 // Names of the host helpers the JIT may call. Declared as imported functions
 // in every trace context (unused declarations are harmless).
 static const char *HOST_FNS[] = {
-  "interrupt", "clearscreen_io", "retern", "call", "random_byte", "draw",
+  "interrupt", "check_interrupt", "clearscreen_io", "retern", "call", "random_byte", "draw",
   "skip_key_x_down", "skip_key_x_up", "load_on_key", "store_bcd",
   "save_registers", "restore_registers",
 };
@@ -349,6 +404,8 @@ code codegen(void)
   gcc_jit_type *t_u16  = gcc_jit_context_get_int_type(ctx, 2, 0);
   gcc_jit_type *t_u8p  = gcc_jit_type_get_pointer(t_u8);
   gcc_jit_type *t_u16p = gcc_jit_type_get_pointer(t_u16);
+  gcc_jit_type *t_int  = gcc_jit_context_get_type(ctx, GCC_JIT_TYPE_INT);
+  gcc_jit_type *t_vintp = gcc_jit_type_get_pointer(gcc_jit_type_get_volatile(t_int));
 
   // The trace itself: void ADDRxxxx(void).
   gcc_jit_function *function =
@@ -380,6 +437,29 @@ code codegen(void)
     gcc_jit_block_add_eval(blk, NULL, \
       gcc_jit_context_new_call(ctx, NULL, host_fn(host, nm), 0, NULL))
   #define BAIL_ERRER  do { gcc_jit_context_release(ctx); return errer; } while (0)
+  // Emit a lightweight safepoint: a volatile load of interrupt_pending and a
+  // conditional call to check_interrupt(). The fast (flag clear) path is a
+  // single load-and-branch, so these can be sprinkled liberally through
+  // traces without hurting throughput; the slow path services timers/input.
+  #define SAFEPOINT() \
+    do { \
+      char sname[24], cname[24]; \
+      snprintf(sname, sizeof(sname), "sp_slow_%d", block_id); \
+      snprintf(cname, sizeof(cname), "sp_cont_%d", block_id); \
+      ++block_id; \
+      gcc_jit_block *slow_blk = gcc_jit_function_new_block(function, sname); \
+      gcc_jit_block *cont_blk = gcc_jit_function_new_block(function, cname); \
+      gcc_jit_rvalue *flag = gcc_jit_lvalue_as_rvalue( \
+        mem(ctx, t_vintp, (void *)&interrupt_pending)); \
+      gcc_jit_rvalue *pending = gcc_jit_context_new_comparison(ctx, NULL, \
+        GCC_JIT_COMPARISON_NE, flag, \
+        gcc_jit_context_new_rvalue_from_int(ctx, t_int, 0)); \
+      gcc_jit_block_end_with_conditional(blk, NULL, pending, slow_blk, cont_blk); \
+      gcc_jit_block_add_eval(slow_blk, NULL, \
+        gcc_jit_context_new_call(ctx, NULL, host_fn(host, "check_interrupt"), 0, NULL)); \
+      gcc_jit_block_end_with_jump(slow_blk, NULL, cont_blk); \
+      blk = cont_blk; \
+    } while (0)
 
   int local_id = 0;
   int block_id = 0;
@@ -387,6 +467,13 @@ code codegen(void)
   for (uint16_t pc = program_counter, op_count = 0; ; pc += 2, ++op_count)
     {
       op = OP_AT(pc);
+
+      // Periodic safepoint: bound the number of straight-line (or taken-skip)
+      // instructions that can execute between input/timer checks.
+      if ((op_count != 0) && ((op_count % SAFEPOINT_INTERVAL) == 0))
+        {
+          SAFEPOINT();
+        }
 
       if (op == 0x00e0)
         { // clear screen
@@ -405,7 +492,7 @@ code codegen(void)
         case 0x1:
           { // jump
             IMMEDIATE12;
-            CALL_HOST("interrupt");
+            SAFEPOINT();
             gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
               gcc_jit_context_new_rvalue_from_int(ctx, t_u16, immediate));
             if ((pc != immediate) && (op_count < (1<<8)))
@@ -700,6 +787,7 @@ code codegen(void)
   remember_result(result); // hold the result so teardown can free its code
   return fn;
 
+  #undef SAFEPOINT
   #undef PC_LVAL
   #undef STEP_AND_CONTINUE
   #undef CALL_HOST
@@ -734,6 +822,7 @@ int main(int argc, const char * argv[])
   last_tick = tick();
   init_chip8();
   init_io(64, 32);
+  init_interrupt_timer();
 
   // Run
   program_counter = ENTRYPOINT;
@@ -747,6 +836,10 @@ int main(int argc, const char * argv[])
         }
       c();
 
+      // Service any pending timer/input interrupt between traces; this also
+      // keeps keys fresh for ROMs that spin on skip_key traces.
+      check_interrupt();
+
       if ((all_keys_down() & (1<<31)) || program_over)
         {
           break;
@@ -754,6 +847,7 @@ int main(int argc, const char * argv[])
       trace_count++;
     }
 
+  deinit_interrupt_timer();
   deinit_io();
   deinit_chip8();
 
