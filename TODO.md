@@ -82,14 +82,26 @@ deliberately omitted.
       only decrements when `> 0`, so the timer never counts down and a ROM
       spin-waiting on `Fx07 == 0` hangs forever. Make the timers `uint8_t`
       (and adjust the `> 0` checks / stderr dump accordingly).
-- [ ] **Unbounded `addr` allows out-of-bounds memory access.** `Annn` sets
+- [x] **Unbounded `addr` allows out-of-bounds memory access.** ~~`Annn` sets
       `addr` up to 0xFFF and `Fx1E` can push it to 0xFFFE, but `store_bcd`,
       `save_registers`, `restore_registers`, and `draw` index `memory[addr+i]`
       with no mask or bounds check (only opcode fetch uses `OPCODE_AT`'s
       masking). A hostile or buggy ROM can read/write past the 4 KiB `memory`
       array -- a real out-of-bounds write in the host process. Mask with
       `(MEMORY_SIZE - 1)` or clamp. Affects the interpreter and both JIT
-      host-helper layers.
+      host-helper layers.~~ *Fixed.* Added a `MEM_AT(a)` macro in `chip8.h`
+      that masks with `(MEMORY_SIZE - 1)`, mirroring the existing `OPCODE_AT`
+      wrap and matching the COSMAC VIP's 12-bit address wrap (authentic, not a
+      clamp). All four data sites now use it in the interpreter and both JIT
+      host-helper layers: `store_bcd`, `save_registers`, `restore_registers`,
+      and `draw` -- the last gathers the sprite rows into a small local buffer
+      with masked indices before handing a pointer to `draw_io`, since the read
+      loop lives inside `draw_io`. Verified with AddressSanitizer: crafted ROMs
+      that push `addr` to 0x0FFF/0x0FFE before `Fx55`/`Dxyn` report a
+      global-buffer-overflow write/read on the unfixed build and are clean
+      after; a `Fx65` wrap test confirms the read lands at `memory[0]` (wrap,
+      not drop). Both JIT binaries execute the masked `Fx55` path without
+      faulting.
 - [ ] **LLVM `8xy5` writes result before flag (divergence).** In
       `llvm_jit.cpp`, `sub_register` stores the difference to `Vx` *first* and
       the borrow flag to `VF` *second* -- the opposite order from the
