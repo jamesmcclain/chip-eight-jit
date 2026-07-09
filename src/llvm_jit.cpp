@@ -289,9 +289,9 @@ extern "C"
     tmp %= 100;
     tens = tmp / 10;
     tmp %= 10;
-    memory[addr+0] = hundreds;
-    memory[addr+1] = tens;
-    memory[addr+2] = tmp;
+    MEM_AT(addr+0) = hundreds;
+    MEM_AT(addr+1) = tens;
+    MEM_AT(addr+2) = tmp;
   }
 
   void skip_key_x(int up)
@@ -357,7 +357,12 @@ extern "C"
     int current_tick;
 
     check_interrupt();
-    FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
+    uint8_t sprite[16];
+    for (int i = 0; i < immediate; ++i)
+      {
+        sprite[i] = MEM_AT(addr+i);
+      }
+    FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
     while((current_tick = tick()) == last_tick)
       {
         usleep(NANOS_PER_TICK>>10);
@@ -373,7 +378,7 @@ extern "C"
 
     for (int i = 0; i <= x; ++i)
       {
-        memory[addr+i] = regs[i];
+        MEM_AT(addr+i) = regs[i];
       }
   }
 
@@ -384,7 +389,7 @@ extern "C"
 
     for (int i = 0; i <= x; ++i)
       {
-        regs[i] = memory[addr+i];
+        regs[i] = MEM_AT(addr+i);
       }
   }
 

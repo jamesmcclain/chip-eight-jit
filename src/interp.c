@@ -328,9 +328,9 @@ uint32_t store_bcd()
   tmp %= 100;
   tens = tmp / 10;
   tmp %= 10;
-  memory[addr+0] = hundreds;
-  memory[addr+1] = tens;
-  memory[addr+2] = tmp;
+  MEM_AT(addr+0) = hundreds;
+  MEM_AT(addr+1) = tens;
+  MEM_AT(addr+2) = tmp;
   STEP;
 }
 
@@ -382,7 +382,12 @@ uint32_t draw()
   int current_tick;
 
   interrupt();
-  FLAGS = draw_io(regs[x], regs[y], immediate, &(memory[addr]));
+  uint8_t sprite[16];
+  for (int i = 0; i < immediate; ++i)
+    {
+      sprite[i] = MEM_AT(addr+i);
+    }
+  FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
   while((current_tick = tick()) == last_tick)
     {
       usleep(NANOS_PER_TICK>>10);
@@ -398,7 +403,7 @@ uint32_t save_registers()
 
   for (int i = 0; i <= x; ++i)
     {
-      memory[addr+i] = regs[i];
+      MEM_AT(addr+i) = regs[i];
     }
   STEP;
 }
@@ -409,7 +414,7 @@ uint32_t restore_registers()
 
   for (int i = 0; i <= x; ++i)
     {
-      regs[i] = memory[addr+i];
+      regs[i] = MEM_AT(addr+i);
     }
   STEP;
 }

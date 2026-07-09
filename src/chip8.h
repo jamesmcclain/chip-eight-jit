@@ -13,6 +13,12 @@
   ((uint16_t)((memory[(pc) & (MEMORY_SIZE - 1)] << 8) |     \
               memory[((pc) + 1) & (MEMORY_SIZE - 1)]))
 
+/* Wrapping data access into the 4 KiB address space. On the COSMAC VIP the
+   12-bit address register wraps at 0x0FFF, so masking is both the authentic
+   behavior and the fix for out-of-bounds host reads/writes when `addr` is
+   pushed near the top of memory (via Annn/Fx1E) before Fx33/Fx55/Fx65/Dxyn. */
+#define MEM_AT(a) memory[(a) & (MEMORY_SIZE - 1)]
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
