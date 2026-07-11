@@ -30,8 +30,8 @@
 // VM bookkeeping state owned by this backend (chip8.c owns the rest)
 
 int last_tick = 0;
-int8_t delay_timer = 0;
-int8_t sound_timer = 0;
+uint8_t delay_timer = 0;
+uint8_t sound_timer = 0;
 uint16_t op = 0;
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;

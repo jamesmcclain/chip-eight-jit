@@ -76,12 +76,23 @@ deliberately omitted.
       16-31 of every slot -- including the `1<<31` "quit" flag. Pressing a
       CHIP-8 key that gets consumed by `Ex9E/ExA1/Fx0A` can silently cancel a
       pending `q`/Escape. The mask should be `~(1u << key)`.
-- [ ] **Timers are `int8_t` and can get stuck.** `delay_timer`/`sound_timer`
+- [x] **Timers are `int8_t` and can get stuck.** ~~`delay_timer`/`sound_timer`
       are signed 8-bit, but `Fx15/Fx18` load them from a full 8-bit register.
       Setting a timer to any value > 127 stores a negative number; `interrupt()`
       only decrements when `> 0`, so the timer never counts down and a ROM
       spin-waiting on `Fx07 == 0` hangs forever. Make the timers `uint8_t`
-      (and adjust the `> 0` checks / stderr dump accordingly).
+      (and adjust the `> 0` checks / stderr dump accordingly).~~ *Fixed.*
+      Changed `delay_timer`/`sound_timer` from `int8_t` to `uint8_t` in the
+      `extern` declarations (`chip8.h`) and all three definitions (`interp.c`,
+      `llvm_jit.cpp`, `libgccjit_jit.c`), so `Fx15/Fx18` values in 128..255 are
+      stored as-is instead of wrapping negative. The `interrupt()` `> 0` guards
+      stay correct and warning-free under unsigned (0 is the only non-decrement
+      case), and the `stderr` dumps (`%d`, via integer promotion) now print the
+      true 0..255 value rather than a spurious negative. The `Fx07` read paths
+      were already byte-verbatim copies into the 8-bit register, so no IR
+      change was needed in the JITs. Verified with a decrement model: an
+      `int8_t` timer set to 200 never reaches 0 (spin-wait hangs); the
+      `uint8_t` timer counts down to 0 in 200 ticks.
 - [x] **Unbounded `addr` allows out-of-bounds memory access.** ~~`Annn` sets
       `addr` up to 0xFFF and `Fx1E` can push it to 0xFFFE, but `store_bcd`,
       `save_registers`, `restore_registers`, and `draw` index `memory[addr+i]`
