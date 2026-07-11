@@ -22,8 +22,8 @@
 
 int last_tick = 0;
 
-int8_t delay_timer = 0;
-int8_t sound_timer = 0;
+uint8_t delay_timer = 0;
+uint8_t sound_timer = 0;
 uint16_t op = 0;
 
 #define INPUT_TICKS (10) // roughly 1/6 window for input

@@ -27,8 +27,8 @@ extern uint16_t stack[];
 extern uint8_t memory[];
 extern uint8_t regs[];
 
-extern int8_t delay_timer;
-extern int8_t sound_timer;
+extern uint8_t delay_timer;
+extern uint8_t sound_timer;
 extern int8_t stack_pointer;
 extern uint16_t addr;
 extern uint16_t program_counter;
