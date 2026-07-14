@@ -96,7 +96,7 @@ void clear_key(uint8_t key)
 {
   for (int i = 0; i < INPUT_TICKS; ++i)
     {
-      keys_down[i] &= (0xffff ^ (1<<key));
+      keys_down[i] &= ~(1u << key);
     }
 }
 

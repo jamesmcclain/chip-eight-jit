@@ -182,7 +182,7 @@ extern "C"
   {
     for (int i = 0; i < INPUT_TICKS; ++i)
       {
-        keys_down[i] &= (0xffff ^ (1<<key));
+        keys_down[i] &= ~(1u << key);
       }
   }
 
@@ -838,7 +838,11 @@ int main(int argc, const char * argv[])
 
   // Load program
   fp = fopen(argv[1], "r");
-  fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp);
+  if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
+    {
+      fprintf(stderr, "Could not read ROM\n");
+      exit(-1);
+    }
   fclose(fp);
 
   // Initialize CHIP-8 state

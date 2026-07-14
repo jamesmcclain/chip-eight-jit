@@ -30,9 +30,24 @@ compiled code.
 Requirements: `gcc`/`g++`, LLVM 20 development files (`llvm-config-20`),
 libgccjit (`libgccjit-*-dev`), and ncurses.
 
+The libgccjit dev package installs its header (`libgccjit.h`) and link stub
+(`libgccjit.so`) under a GCC-version-specific directory such as
+`/usr/lib/gcc/x86_64-linux-gnu/14/`, which is **not** on the compiler's default
+search path. The Makefile does not add it automatically, so on Debian/Ubuntu you
+must point `CPPFLAGS` and `LDFLAGS` at that directory. Derive it from the
+compiler rather than hardcoding the version:
+
+```sh
+gccjit_dir=$(gcc -print-file-name=.)   # e.g. /usr/lib/gcc/x86_64-linux-gnu/14
+make CPPFLAGS="-I$gccjit_dir/include" LDFLAGS="-L$gccjit_dir"
+```
+
+If you only need the interpreter, LLVM, or disassembler targets, the libgccjit
+path is not required and a plain `make chip8-interp` (etc.) will work without it.
+
 ```sh
 cd src
-make                 # builds all four targets
+make                 # builds all four targets (needs the libgccjit flags above)
 make chip8-interp    # or build a single target
 ```
 
