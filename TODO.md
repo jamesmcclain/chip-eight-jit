@@ -70,12 +70,17 @@ deliberately omitted.
 
 ## Correctness
 
-- [ ] **`clear_key` erases the quit bit (and all high bits).** In all three
+- [x] **`clear_key` erases the quit bit (and all high bits).** In all three
       engines, `clear_key` does `keys_down[i] &= (0xffff ^ (1<<key))`. For any
       `key < 16` the mask's upper 16 bits are zero, so the AND wipes bits
       16-31 of every slot -- including the `1<<31` "quit" flag. Pressing a
       CHIP-8 key that gets consumed by `Ex9E/ExA1/Fx0A` can silently cancel a
       pending `q`/Escape. The mask should be `~(1u << key)`.
+      *Fixed.* Changed the mask to `~(1u << key)` in all three engines
+      (`interp.c`, `llvm_jit.cpp`, `libgccjit_jit.c`). The new mask has its
+      upper bits set, so only the target key bit is cleared and the `1<<31`
+      quit flag (and every other high bit) is preserved across key-consume
+      paths. Verified by rebuild: all four targets compile clean.
 - [x] **Timers are `int8_t` and can get stuck.** ~~`delay_timer`/`sound_timer`
       are signed 8-bit, but `Fx15/Fx18` load them from a full 8-bit register.
       Setting a timer to any value > 127 stores a negative number; `interrupt()`
