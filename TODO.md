@@ -44,9 +44,17 @@ deliberately omitted.
 
 ## Build hygiene
 
-- [ ] **Ignored `fread` result.** `interp.c` and `llvm_jit.cpp` ignore the return
+- [x] **Ignored `fread` result.** `interp.c` and `llvm_jit.cpp` ignore the return
       value of `fread` when loading the ROM (the compiler warns); short reads and
       missing ROMs go undetected. `libgccjit_jit.c` now checks it.
+      *Fixed.* Added the same `== 0` check and `Could not read ROM` diagnostic
+      that `libgccjit_jit.c` already used to `interp.c`, `llvm_jit.cpp`, and
+      `disas.c` (which had the identical ignored-result warning). All four
+      backends now exit non-zero on a zero-length read instead of running on
+      an empty memory image. Note: a *missing* ROM path still segfaults before
+      `fread` runs because `fopen` returns `NULL` unchecked -- that is the
+      separate "`fopen` result is never checked" item below and is out of
+      scope here.
 
 ## Maintainability
 

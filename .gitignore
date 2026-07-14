@@ -1,4 +1,5 @@
 roms/
+*howto*.md*
 *.howto
 *.asm
 *.o

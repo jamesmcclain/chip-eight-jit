@@ -550,7 +550,11 @@ int main(int argc, const char * argv[])
 
   // load
   fp = fopen(argv[1], "r");
-  fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp);
+  if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
+    {
+      fprintf(stderr, "Could not read ROM\n");
+      exit(-1);
+    }
   fclose(fp);
 
   // initialize
