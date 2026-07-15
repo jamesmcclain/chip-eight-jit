@@ -34,12 +34,10 @@ The libgccjit dev package installs its header (`libgccjit.h`) and link stub
 (`libgccjit.so`) under a GCC-version-specific directory such as
 `/usr/lib/gcc/x86_64-linux-gnu/14/`, which is **not** on the compiler's default
 search path. The Makefile does not add it automatically, so on Debian/Ubuntu you
-must point `CPPFLAGS` and `LDFLAGS` at that directory. Derive it from the
-compiler rather than hardcoding the version:
+must point `CPPFLAGS` and `LDFLAGS` at that directory. The one-liner to properly invoke `make -C src` (with libgccjit flags, including cleanest) is:
 
 ```sh
-gccjit_dir=$(gcc -print-file-name=.)   # e.g. /usr/lib/gcc/x86_64-linux-gnu/14
-make CPPFLAGS="-I$gccjit_dir/include" LDFLAGS="-L$gccjit_dir"
+gccjit_dir=$(dirname $(find /usr/lib/gcc -name libgccjit.so 2>/dev/null | head -1)); CPPFLAGS="-I$gccjit_dir/include" LDFLAGS="-L$gccjit_dir" make -C src
 ```
 
 If you only need the interpreter, LLVM, or disassembler targets, the libgccjit
