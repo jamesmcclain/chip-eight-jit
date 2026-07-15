@@ -39,8 +39,20 @@ deliberately omitted.
 
 - [ ] **`VF`-as-destination ordering.** For `8xy4/5/6/7/E` the flag is written to
       `VF` and then the result to `Vx`, so when `x == 0xF` the result clobbers the
-      just-written flag. Preserved identically across all three engines; confirm
-      this is the intended behavior.
+      just-written flag. ~~Preserved identically across all three engines; confirm
+      this is the intended behavior.~~ *Not identical.* Dynamic testing of
+      `8F15` (`VF=5, V1=3, VF-=V1`) showed the interpreter yields `VF=0xFE`
+      while both JITs yield `VF=0x02`. The JITs snapshot `Vx`/`Vy` into SSA
+      temporaries before either store, so the result is `5-3=2` and clobbers
+      the flag; the interpreter writes the flag (`VF=1`) then does
+      `regs[x] -= regs[y]`, which re-reads the clobbered `VF` and computes
+      `1-3=0xFE`. The store *order* is now flag-first in all three engines
+      (the LLVM `8xy5` ordering item above is fixed); the remaining divergence
+      is snapshot-vs-read-modify-write, which also affects `8xy4`/`8xy7` when
+      `x == 0xF`. No real ROM is known to write the flag register back into
+      itself, so this is a corner-case semantics question, not a practical
+      bug. Decide which behavior is intended (the interpreter's matches a
+      literal sequential-hardware reading) and align or document.
 
 ## Build hygiene
 
@@ -126,14 +138,28 @@ deliberately omitted.
       after; a `Fx65` wrap test confirms the read lands at `memory[0]` (wrap,
       not drop). Both JIT binaries execute the masked `Fx55` path without
       faulting.
-- [ ] **LLVM `8xy5` writes result before flag (divergence).** In
+- [x] **LLVM `8xy5` writes result before flag (divergence).** In
       `llvm_jit.cpp`, `sub_register` stores the difference to `Vx` *first* and
       the borrow flag to `VF` *second* -- the opposite order from the
-      interpreter and the libgccjit backend. When `x == 0xF`, the LLVM engine
-      leaves the flag in `VF` while the other two leave the result. This
-      contradicts the "preserved identically across all three engines" claim
-      in the `VF`-as-destination item above; pick one order and align all
-      three.
+      libgccjit backend (and from LLVM's own sibling opcodes `8xy4/6/7/E`,
+      which are already flag-first). When `x == 0xF`, the LLVM engine leaves
+      the flag in `VF` while libgccjit leaves the result.
+      *Fixed.* Reordered the two `CreateStore`s in `case 0x5` so the flag
+      store precedes the result store, mirroring `case 0x4`. The comparison's
+      operands are SSA-loaded before either store, so the reorder only changes
+      which value lands last in `VF` when `x == 0xF`; for `x != 0xF` it is a
+      no-op. Verified dynamically with a 3-instruction ROM
+      (`6F05 6103 8F15` + spin): LLVM went `VF=0x01`->`0x02`, now matching
+      libgccjit (`0x02`); the normal case `8015` is unchanged across all three
+      engines (`V0=0x02, VF=0x01`), and PONG runs/exits clean under LLVM.
+      **Caveat discovered by the dynamic test:** the interpreter gives
+      `VF=0xFE` on the `8F15` case, not `0x02`, because it lacks the JITs'
+      operand snapshot -- it writes the flag to `VF`, then `regs[x] -= regs[y]`
+      re-reads the just-clobbered `VF`. So the original item's claim that the
+      interpreter and libgccjit "agree" was true only for `x != 0xF`; for
+      `x == 0xF` the interpreter diverges from *both* JITs. That is a
+      snapshot-vs-read-modify-write difference, orthogonal to store order, and
+      is recorded under the `VF`-as-destination quirk below.
 - [ ] **`fopen` result is never checked.** All four `main`s call
       `fopen(argv[1], "r")` and pass the result straight to `fread` --
       a missing ROM path segfaults before any diagnostic. Check for `NULL`
