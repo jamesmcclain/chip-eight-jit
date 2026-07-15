@@ -621,11 +621,11 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 int f = 0xf; JIT_GETPTRREG(f);
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto diff_value = builder->CreateSub(JIT_VALUE(x), JIT_VALUE(y));
-                builder->CreateStore(diff_value, JIT_PTR(x));
                 auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGT, JIT_VALUE(x), JIT_VALUE(y));
                 auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
                 builder->CreateStore(cmp8_value, JIT_PTR(f));
+                auto diff_value = builder->CreateSub(JIT_VALUE(x), JIT_VALUE(y));
+                builder->CreateStore(diff_value, JIT_PTR(x));
                 JIT_STEP;
               }
             case 0x6:
@@ -837,10 +837,16 @@ int main(int argc, const char * argv[])
     }
 
   // Load program
-  fp = fopen(argv[1], "r");
+  fp = fopen(argv[1], "rb");
+  if (fp == NULL)
+    {
+      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      exit(-1);
+    }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
     {
       fprintf(stderr, "Could not read ROM\n");
+      fclose(fp);
       exit(-1);
     }
   fclose(fp);

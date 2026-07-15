@@ -7,7 +7,7 @@
 #define ENTRYPOINT (0x200)
 #define MEMORY_SIZE (0x1000)
 
-#define ERROR fprintf(stdout, "op code %0x04X\n", op)
+#define ERROR fprintf(stdout, "op code %04X at pc 0x%04X\n", op, program_counter)
 #define PC fprintf(stdout, "0x%04X:\t", program_counter)
 #define STEP return 0
 
@@ -376,10 +376,16 @@ int main(int argc, const char * argv[])
     }
 
   // load
-  fp = fopen(argv[1], "r");
+  fp = fopen(argv[1], "rb");
+  if (fp == NULL)
+    {
+      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      exit(-1);
+    }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
     {
       fprintf(stderr, "Could not read ROM\n");
+      fclose(fp);
       exit(-1);
     }
   fclose(fp);

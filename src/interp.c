@@ -215,8 +215,9 @@ uint32_t sub_register()
 {
   X; Y;
 
-  FLAGS = (regs[x] > regs[y]) ? 1 : 0;
-  regs[x] -= regs[y];
+  uint8_t vx = regs[x], vy = regs[y];
+  FLAGS = (vx > vy) ? 1 : 0;
+  regs[x] = vx - vy;
   STEP;
 }
 
@@ -225,9 +226,10 @@ uint32_t shift_right()
   X;
   /* Y; */
 
-  FLAGS = regs[x] & 0x01;
+  uint8_t vx = regs[x];
+  FLAGS = vx & 0x01;
   /* regs[x] >>= regs[y]; */
-  regs[x] >>= 1;
+  regs[x] = vx >> 1;
   STEP;
 }
 
@@ -235,8 +237,9 @@ uint32_t subn_register()
 {
   X; Y;
 
-  FLAGS = (regs[y] > regs[x]) ? 1 : 0;
-  regs[x] = regs[y] - regs[x];
+  uint8_t vx = regs[x], vy = regs[y];
+  FLAGS = (vy > vx) ? 1 : 0;
+  regs[x] = vy - vx;
   STEP;
 }
 
@@ -245,9 +248,10 @@ uint32_t shift_left()
   X;
   /* Y; */
 
-  FLAGS = (regs[x] & 0x80) ? 1 : 0;
+  uint8_t vx = regs[x];
+  FLAGS = (vx & 0x80) ? 1 : 0;
   /* regs[x] <<= regs[y]; */
-  regs[x] <<= 1;
+  regs[x] = vx << 1;
   STEP;
 }
 
@@ -549,10 +553,16 @@ int main(int argc, const char * argv[])
     }
 
   // load
-  fp = fopen(argv[1], "r");
+  fp = fopen(argv[1], "rb");
+  if (fp == NULL)
+    {
+      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      exit(-1);
+    }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
     {
       fprintf(stderr, "Could not read ROM\n");
+      fclose(fp);
       exit(-1);
     }
   fclose(fp);
