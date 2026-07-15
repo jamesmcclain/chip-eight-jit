@@ -215,8 +215,9 @@ uint32_t sub_register()
 {
   X; Y;
 
-  FLAGS = (regs[x] > regs[y]) ? 1 : 0;
-  regs[x] -= regs[y];
+  uint8_t vx = regs[x], vy = regs[y];
+  FLAGS = (vx > vy) ? 1 : 0;
+  regs[x] = vx - vy;
   STEP;
 }
 
@@ -225,9 +226,10 @@ uint32_t shift_right()
   X;
   /* Y; */
 
-  FLAGS = regs[x] & 0x01;
+  uint8_t vx = regs[x];
+  FLAGS = vx & 0x01;
   /* regs[x] >>= regs[y]; */
-  regs[x] >>= 1;
+  regs[x] = vx >> 1;
   STEP;
 }
 
@@ -235,8 +237,9 @@ uint32_t subn_register()
 {
   X; Y;
 
-  FLAGS = (regs[y] > regs[x]) ? 1 : 0;
-  regs[x] = regs[y] - regs[x];
+  uint8_t vx = regs[x], vy = regs[y];
+  FLAGS = (vy > vx) ? 1 : 0;
+  regs[x] = vy - vx;
   STEP;
 }
 
@@ -245,9 +248,10 @@ uint32_t shift_left()
   X;
   /* Y; */
 
-  FLAGS = (regs[x] & 0x80) ? 1 : 0;
+  uint8_t vx = regs[x];
+  FLAGS = (vx & 0x80) ? 1 : 0;
   /* regs[x] <<= regs[y]; */
-  regs[x] <<= 1;
+  regs[x] = vx << 1;
   STEP;
 }
 

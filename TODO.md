@@ -37,22 +37,25 @@ deliberately omitted.
 
 ## Semantics / quirks
 
-- [ ] **`VF`-as-destination ordering.** For `8xy4/5/6/7/E` the flag is written to
+- [x] **`VF`-as-destination ordering.** For `8xy4/5/6/7/E` the flag is written to
       `VF` and then the result to `Vx`, so when `x == 0xF` the result clobbers the
       just-written flag. ~~Preserved identically across all three engines; confirm
-      this is the intended behavior.~~ *Not identical.* Dynamic testing of
-      `8F15` (`VF=5, V1=3, VF-=V1`) showed the interpreter yields `VF=0xFE`
-      while both JITs yield `VF=0x02`. The JITs snapshot `Vx`/`Vy` into SSA
-      temporaries before either store, so the result is `5-3=2` and clobbers
-      the flag; the interpreter writes the flag (`VF=1`) then does
-      `regs[x] -= regs[y]`, which re-reads the clobbered `VF` and computes
-      `1-3=0xFE`. The store *order* is now flag-first in all three engines
-      (the LLVM `8xy5` ordering item above is fixed); the remaining divergence
-      is snapshot-vs-read-modify-write, which also affects `8xy4`/`8xy7` when
-      `x == 0xF`. No real ROM is known to write the flag register back into
-      itself, so this is a corner-case semantics question, not a practical
-      bug. Decide which behavior is intended (the interpreter's matches a
-      literal sequential-hardware reading) and align or document.
+      this is the intended behavior.~~ *Now aligned (snapshot semantics).* The
+      interpreter previously diverged from both JITs for `x == 0xF` because it
+      lacked the JITs' operand snapshot: it wrote the flag to `VF`, then
+      `regs[x] -= regs[y]` (etc.) re-read the just-clobbered `VF`. The JITs
+      snapshot `Vx`/`Vy` into SSA temporaries before either store, so the result
+      is computed from the original operands and clobbers the flag.
+      *Fixed.* Snapshot the operands into locals in the four affected
+      interpreter opcodes -- `sub_register` (`8xy5`), `subn_register` (`8xy7`),
+      `shift_right` (`8xy6`), `shift_left` (`8xyE`) -- before the flag write, and
+      compute the result from the locals. (`add_register`/`8xy4` was already
+      snapshot-equivalent via its precomputed `tmp`.) The store order is now
+      flag-first in all three engines and all snapshot their operands, so
+      `x == 0xF` uniformly yields "result wins." The change is a no-op for
+      `x != 0xF`. Verified dynamically: the interpreter's `8F15/8F17/8F16/8F1E`
+      results changed from `FE/03/00/02` to `02/FE/02/00`, now matching both
+      JITs; the normal `8015` case and PONG/TETRIS/TANK/BRIX run clean.
 
 ## Build hygiene
 
@@ -159,7 +162,8 @@ deliberately omitted.
       interpreter and libgccjit "agree" was true only for `x != 0xF`; for
       `x == 0xF` the interpreter diverges from *both* JITs. That is a
       snapshot-vs-read-modify-write difference, orthogonal to store order, and
-      is recorded under the `VF`-as-destination quirk below.
+      is recorded under the `VF`-as-destination quirk below, where it has since
+      been fixed (interpreter now snapshots its operands).
 - [ ] **`fopen` result is never checked.** All four `main`s call
       `fopen(argv[1], "r")` and pass the result straight to `fread` --
       a missing ROM path segfaults before any diagnostic. Check for `NULL`
