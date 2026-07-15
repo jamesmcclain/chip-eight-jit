@@ -837,10 +837,16 @@ int main(int argc, const char * argv[])
     }
 
   // Load program
-  fp = fopen(argv[1], "r");
+  fp = fopen(argv[1], "rb");
+  if (fp == NULL)
+    {
+      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      exit(-1);
+    }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
     {
       fprintf(stderr, "Could not read ROM\n");
+      fclose(fp);
       exit(-1);
     }
   fclose(fp);
