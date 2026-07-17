@@ -19,10 +19,13 @@ deliberately omitted.
 
 ## JIT robustness
 
-- [ ] **Self-modifying code is not handled by the JITs.** Traces are cached by
-      entry PC and never invalidated, so writes into a code region (e.g. via
-      `Fx55`) are not reflected in already-compiled traces. The interpreter
-      handles SMC correctly because it re-decodes every instruction.
+- [x] **Self-modifying code is not handled by the JITs.** Trace caches are now
+      invalidated after code-writing `Fx33`/`Fx55` operations. Those operations
+      terminate their current trace, and both JITs release compiled resources,
+      clear their caches, and re-decode from the updated memory before running
+      further code. This uses conservative full-cache invalidation rather than
+      range tracking; it is correct, though less efficient than selective
+      invalidation.
 - [x] **Compiled code is intentionally leaked.** ~~LLVM modules and libgccjit
       `gcc_jit_result`s are never released and there is no JIT teardown. Fine for
       short runs; grows unbounded for long-lived or SMC-heavy programs.~~
@@ -34,6 +37,16 @@ deliberately omitted.
       actually runs. This bounds the steady-state leak to whatever traces are
       currently cached; reclaiming superseded traces during a run is the separate
       SMC item above.
+- [x] **Failed codegen leaks and is cached as `errer`.** Unknown opcodes now
+      fail code generation explicitly in both JITs, release their temporary
+      compiler state, and return `NULL` instead of caching the host `errer`
+      function as executable trace code. The run loops report the failure and
+      stop without installing a crash-on-execute stub.
+- [x] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
+      instruction.** When quit is pressed during a blocked key wait, all three
+      engines now report quit through the same `ERROR` path, keeping the PC on
+      the waiting instruction and aligning diagnostic/exit behavior for
+      cross-checking.
 
 ## Semantics / quirks
 
@@ -90,8 +103,6 @@ deliberately omitted.
       well-understood set of helpers; we accept it rather than take on a riskier
       abstraction. Revisit only if a fourth backend appears or the helper set
       grows substantially.
-
-## Correctness
 
 - [x] **`clear_key` erases the quit bit (and all high bits).** In all three
       engines, `clear_key` does `keys_down[i] &= (0xffff ^ (1<<key))`. For any
@@ -164,18 +175,26 @@ deliberately omitted.
       snapshot-vs-read-modify-write difference, orthogonal to store order, and
       is recorded under the `VF`-as-destination quirk below, where it has since
       been fixed (interpreter now snapshots its operands).
-- [ ] **`fopen` result is never checked.** All four `main`s call
+- [x] **`fopen` result is never checked.** All four `main`s call
       `fopen(argv[1], "r")` and pass the result straight to `fread` --
       a missing ROM path segfaults before any diagnostic. Check for `NULL`
       and print a usable error. (Related to, but distinct from, the existing
       "ignored `fread` result" item: `libgccjit_jit.c` checks `fread` but
       still not `fopen`.) Also open with `"rb"` for portability.
-- [ ] **`disas.c` error format string is malformed.** `#define ERROR
+      *Fixed.* All four `main`s (`interp.c`, `llvm_jit.cpp`, `libgccjit_jit.c`,
+      `disas.c`) now check `fp == NULL` right after `fopen`, printing
+      `Could not open ROM <path>` and exiting non-zero before `fread` runs.
+      The mode is also already `"rb"` everywhere, so the portability sub-point
+      is satisfied too. The `libgccjit_jit.c` caveat no longer holds: it now
+      checks `fopen` in addition to `fread`.
+- [x] **`disas.c` error format string is malformed.** `#define ERROR
       fprintf(stdout, "op code %0x04X\n", op)` -- `%0x` consumes `op` and the
       `04X` prints literally (e.g. `op code ab04X`). Should be `%04X`. The
       unknown-opcode path also doesn't print the PC.
-
-## Semantics / quirks
+      *Fixed.* `#define ERROR` now reads
+      `fprintf(stdout, "op code %04X at pc 0x%04X\n", op, program_counter)`:
+      the `%0x04X` typo is corrected to `%04X`, and the unknown-opcode path
+      prints the PC alongside the opcode.
 
 - [ ] **`8xy5/8xy7` borrow flag on equality.** All three engines set
       `VF = (Vx > Vy)` (strict), so `Vx == Vy` yields `VF = 0`. The
@@ -191,24 +210,6 @@ deliberately omitted.
       commented out and both JITs shift `Vx` in place (the "modern"/SCHIP
       quirk). Fine as a choice, but it's undocumented; add a quirks section
       to the README so ROM incompatibilities are explainable.
-
-## JIT robustness
-
-- [ ] **Failed codegen leaks and is cached as `errer`.** On an unknown opcode,
-      `llvm_jit.cpp`'s `codegen` returns the host `errer` function mid-build,
-      abandoning the partially built module/context (the libgccjit backend at
-      least releases its context in `BAIL_ERRER`). In both backends the
-      returned `errer` pointer is then stored in the trace cache as if it were
-      a compiled trace. Consider failing more loudly at compile time instead
-      of deferring to a cached crash-on-execute stub.
-- [ ] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
-      instruction.** When quit is pressed during a blocked key wait, both JIT
-      helpers set `program_over` without stepping the PC, while the
-      interpreter reports it via `ERROR` with a different exit status/message.
-      Harmless, but the three engines' final register/PC dumps differ for the
-      same input; worth unifying if the dumps are used for cross-checking.
-
-## Build hygiene
 
 - [ ] **Header dependencies aren't tracked.** The pattern rule
       `%.o: %.c %.h` only fires when a same-named header exists
