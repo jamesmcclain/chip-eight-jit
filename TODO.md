@@ -196,8 +196,6 @@ deliberately omitted.
       the `%0x04X` typo is corrected to `%04X`, and the unknown-opcode path
       prints the PC alongside the opcode.
 
-## Semantics / quirks
-
 - [ ] **`8xy5/8xy7` borrow flag on equality.** All three engines set
       `VF = (Vx > Vy)` (strict), so `Vx == Vy` yields `VF = 0`. The
       conventional semantics is "VF = NOT borrow", i.e. `Vx >= Vy` sets
