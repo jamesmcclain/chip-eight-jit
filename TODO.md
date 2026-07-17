@@ -164,16 +164,26 @@ deliberately omitted.
       snapshot-vs-read-modify-write difference, orthogonal to store order, and
       is recorded under the `VF`-as-destination quirk below, where it has since
       been fixed (interpreter now snapshots its operands).
-- [ ] **`fopen` result is never checked.** All four `main`s call
+- [x] **`fopen` result is never checked.** All four `main`s call
       `fopen(argv[1], "r")` and pass the result straight to `fread` --
       a missing ROM path segfaults before any diagnostic. Check for `NULL`
       and print a usable error. (Related to, but distinct from, the existing
       "ignored `fread` result" item: `libgccjit_jit.c` checks `fread` but
       still not `fopen`.) Also open with `"rb"` for portability.
-- [ ] **`disas.c` error format string is malformed.** `#define ERROR
+      *Fixed.* All four `main`s (`interp.c`, `llvm_jit.cpp`, `libgccjit_jit.c`,
+      `disas.c`) now check `fp == NULL` right after `fopen`, printing
+      `Could not open ROM <path>` and exiting non-zero before `fread` runs.
+      The mode is also already `"rb"` everywhere, so the portability sub-point
+      is satisfied too. The `libgccjit_jit.c` caveat no longer holds: it now
+      checks `fopen` in addition to `fread`.
+- [x] **`disas.c` error format string is malformed.** `#define ERROR
       fprintf(stdout, "op code %0x04X\n", op)` -- `%0x` consumes `op` and the
       `04X` prints literally (e.g. `op code ab04X`). Should be `%04X`. The
       unknown-opcode path also doesn't print the PC.
+      *Fixed.* `#define ERROR` now reads
+      `fprintf(stdout, "op code %04X at pc 0x%04X\n", op, program_counter)`:
+      the `%0x04X` typo is corrected to `%04X`, and the unknown-opcode path
+      prints the PC alongside the opcode.
 
 ## Semantics / quirks
 
