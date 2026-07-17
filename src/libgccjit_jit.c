@@ -441,7 +441,7 @@ code codegen(void)
   #define CALL_HOST(nm) \
     gcc_jit_block_add_eval(blk, NULL, \
       gcc_jit_context_new_call(ctx, NULL, host_fn(host, nm), 0, NULL))
-  #define BAIL_ERRER  do { gcc_jit_context_release(ctx); return errer; } while (0)
+  #define BAIL_ERRER  do { fprintf(stderr, "JIT codegen failed at pc=%04x\n", program_counter); gcc_jit_context_release(ctx); return NULL; } while (0)
   // Emit a lightweight safepoint: a volatile load of interrupt_pending and a
   // conditional call to check_interrupt(). The fast (flag clear) path is a
   // single load-and-branch, so these can be sprinkled liberally through
@@ -782,12 +782,16 @@ code codegen(void)
   gcc_jit_result *result = gcc_jit_context_compile(ctx);
   gcc_jit_context_release(ctx); // the result owns the code independently
   if (!result)
-    return errer;
+    {
+      fprintf(stderr, "JIT codegen failed at pc=%04x\n", program_counter);
+      return NULL;
+    }
   code fn = (code)gcc_jit_result_get_code(result, fn_name);
   if (!fn)
     {
       gcc_jit_result_release(result);
-      return errer;
+      fprintf(stderr, "JIT codegen failed at pc=%04x\n", program_counter);
+      return NULL;
     }
   remember_result(result); // hold the result so teardown can free its code
   return fn;
@@ -842,7 +846,12 @@ int main(int argc, const char * argv[])
       code c = trace_cache[program_counter];
       if (c == NULL)
         {
-          trace_cache[program_counter] = codegen();
+          code compiled = codegen();
+          if (compiled == NULL)
+            {
+              break;
+            }
+          trace_cache[program_counter] = compiled;
           continue;
         }
       c();

@@ -34,13 +34,11 @@ deliberately omitted.
       actually runs. This bounds the steady-state leak to whatever traces are
       currently cached; reclaiming superseded traces during a run is the separate
       SMC item above.
-- [ ] **Failed codegen leaks and is cached as `errer`.** On an unknown opcode,
-      `llvm_jit.cpp`'s `codegen` returns the host `errer` function mid-build,
-      abandoning the partially built module/context (the libgccjit backend at
-      least releases its context in `BAIL_ERRER`). In both backends the
-      returned `errer` pointer is then stored in the trace cache as if it were
-      a compiled trace. Consider failing more loudly at compile time instead
-      of deferring to a cached crash-on-execute stub.
+- [x] **Failed codegen leaks and is cached as `errer`.** Unknown opcodes now
+      fail code generation explicitly in both JITs, release their temporary
+      compiler state, and return `NULL` instead of caching the host `errer`
+      function as executable trace code. The run loops report the failure and
+      stop without installing a crash-on-execute stub.
 - [x] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
       instruction.** When quit is pressed during a blocked key wait, all three
       engines now report quit through the same `ERROR` path, keeping the PC on

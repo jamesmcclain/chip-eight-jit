@@ -665,7 +665,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 JIT_STEP;
               }
             default:
-              return errer;
+              fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+              return nullptr;
             }
         }
       case 0xa:
@@ -711,7 +712,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 JIT_DONE;
               }
             default:
-              return errer;
+              fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+              return nullptr;
             }
         }
       case 0xf:
@@ -787,7 +789,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             }
         }
       default:
-        return errer;
+        fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+        return nullptr;
       }
   }
 
@@ -877,7 +880,12 @@ int main(int argc, const char * argv[])
       // If no code found, generate some
       if (it == trace_cache->end())
         {
-          trace_cache->operator[](program_counter) = codegen(TheJIT);
+          code compiled = codegen(TheJIT);
+          if (compiled == nullptr)
+            {
+              break;
+            }
+          trace_cache->operator[](program_counter) = compiled;
           continue;
         }
       // Otherwise run the code that has been found
