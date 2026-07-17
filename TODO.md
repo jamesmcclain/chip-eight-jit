@@ -34,6 +34,19 @@ deliberately omitted.
       actually runs. This bounds the steady-state leak to whatever traces are
       currently cached; reclaiming superseded traces during a run is the separate
       SMC item above.
+- [ ] **Failed codegen leaks and is cached as `errer`.** On an unknown opcode,
+      `llvm_jit.cpp`'s `codegen` returns the host `errer` function mid-build,
+      abandoning the partially built module/context (the libgccjit backend at
+      least releases its context in `BAIL_ERRER`). In both backends the
+      returned `errer` pointer is then stored in the trace cache as if it were
+      a compiled trace. Consider failing more loudly at compile time instead
+      of deferring to a cached crash-on-execute stub.
+- [ ] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
+      instruction.** When quit is pressed during a blocked key wait, both JIT
+      helpers set `program_over` without stepping the PC, while the
+      interpreter reports it via `ERROR` with a different exit status/message.
+      Harmless, but the three engines' final register/PC dumps differ for the
+      same input; worth unifying if the dumps are used for cross-checking.
 
 ## Semantics / quirks
 
@@ -201,22 +214,6 @@ deliberately omitted.
       commented out and both JITs shift `Vx` in place (the "modern"/SCHIP
       quirk). Fine as a choice, but it's undocumented; add a quirks section
       to the README so ROM incompatibilities are explainable.
-
-## JIT robustness
-
-- [ ] **Failed codegen leaks and is cached as `errer`.** On an unknown opcode,
-      `llvm_jit.cpp`'s `codegen` returns the host `errer` function mid-build,
-      abandoning the partially built module/context (the libgccjit backend at
-      least releases its context in `BAIL_ERRER`). In both backends the
-      returned `errer` pointer is then stored in the trace cache as if it were
-      a compiled trace. Consider failing more loudly at compile time instead
-      of deferring to a cached crash-on-execute stub.
-- [ ] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
-      instruction.** When quit is pressed during a blocked key wait, both JIT
-      helpers set `program_over` without stepping the PC, while the
-      interpreter reports it via `ERROR` with a different exit status/message.
-      Harmless, but the three engines' final register/PC dumps differ for the
-      same input; worth unifying if the dumps are used for cross-checking.
 
 ## Build hygiene
 
