@@ -36,6 +36,7 @@ uint16_t op = 0;
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 int program_over = 0;
+volatile sig_atomic_t smc_pending = 0;
 
 // Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
 // INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
@@ -195,6 +196,7 @@ void random_byte()
 
 void store_bcd()
 {
+  smc_pending = 1;
   op = OP_AT(program_counter);
   X;
   uint8_t tmp = regs[x];
@@ -207,6 +209,7 @@ void store_bcd()
   MEM_AT(addr+0) = hundreds;
   MEM_AT(addr+1) = tens;
   MEM_AT(addr+2) = tmp;
+  program_counter += 2;
 }
 
 void skip_key_x(int up)
@@ -288,6 +291,7 @@ void draw()
 
 void save_registers()
 {
+  smc_pending = 1;
   op = OP_AT(program_counter);
   X;
 
@@ -295,6 +299,7 @@ void save_registers()
     {
       MEM_AT(addr+i) = regs[i];
     }
+  program_counter += 2;
 }
 
 void restore_registers()
@@ -758,10 +763,10 @@ code codegen(void)
                 }
               case 0x33:
                 CALL_HOST("store_bcd");
-                STEP_AND_CONTINUE;
+                goto end_of_trace;
               case 0x55:
                 CALL_HOST("save_registers");
-                STEP_AND_CONTINUE;
+                goto end_of_trace;
               case 0x65:
                 CALL_HOST("restore_registers");
                 STEP_AND_CONTINUE;
@@ -859,6 +864,18 @@ int main(int argc, const char * argv[])
       // Service any pending timer/input interrupt between traces; this also
       // keeps keys fresh for ROMs that spin on skip_key traces.
       check_interrupt();
+
+      if (smc_pending)
+        {
+          for (size_t i = 0; i < n_trace_results; ++i)
+            gcc_jit_result_release(trace_results[i]);
+          free(trace_results);
+          trace_results = NULL;
+          n_trace_results = 0;
+          cap_trace_results = 0;
+          memset(trace_cache, 0, sizeof(trace_cache));
+          smc_pending = 0;
+        }
 
       if ((all_keys_down() & (1<<31)) || program_over)
         {

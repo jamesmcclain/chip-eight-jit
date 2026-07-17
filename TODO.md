@@ -19,10 +19,13 @@ deliberately omitted.
 
 ## JIT robustness
 
-- [ ] **Self-modifying code is not handled by the JITs.** Traces are cached by
-      entry PC and never invalidated, so writes into a code region (e.g. via
-      `Fx55`) are not reflected in already-compiled traces. The interpreter
-      handles SMC correctly because it re-decodes every instruction.
+- [x] **Self-modifying code is not handled by the JITs.** Trace caches are now
+      invalidated after code-writing `Fx33`/`Fx55` operations. Those operations
+      terminate their current trace, and both JITs release compiled resources,
+      clear their caches, and re-decode from the updated memory before running
+      further code. This uses conservative full-cache invalidation rather than
+      range tracking; it is correct, though less efficient than selective
+      invalidation.
 - [x] **Compiled code is intentionally leaked.** ~~LLVM modules and libgccjit
       `gcc_jit_result`s are never released and there is no JIT teardown. Fine for
       short runs; grows unbounded for long-lived or SMC-heavy programs.~~

@@ -125,6 +125,7 @@ uint16_t op = 0;
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 bool program_over = false;
+volatile sig_atomic_t smc_pending = 0;
 
 // Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
 // INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
@@ -280,6 +281,7 @@ extern "C"
 
   void store_bcd()
   {
+    smc_pending = 1;
     OP;
     X;
     uint8_t tmp = regs[x];
@@ -292,6 +294,7 @@ extern "C"
     MEM_AT(addr+0) = hundreds;
     MEM_AT(addr+1) = tens;
     MEM_AT(addr+2) = tmp;
+    program_counter += 2;
   }
 
   void skip_key_x(int up)
@@ -373,6 +376,7 @@ extern "C"
 
   void save_registers()
   {
+    smc_pending = 1;
     OP;
     X;
 
@@ -380,6 +384,7 @@ extern "C"
       {
         MEM_AT(addr+i) = regs[i];
       }
+    program_counter += 2;
   }
 
   void restore_registers()
@@ -774,12 +779,12 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             case 0x33:
               {
                 JIT_CALL("store_bcd");
-                JIT_STEP;
+                JIT_DONE;
               }
             case 0x55:
               {
                 JIT_CALL("save_registers");
-                JIT_STEP;
+                JIT_DONE;
               }
             case 0x65:
               {
@@ -810,6 +815,18 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 }
 
 // ------------------------------------------------------------------------
+
+void invalidate_traces()
+{
+  for (auto & RT : trace_resources)
+    {
+      ExitOnErr(RT->remove());
+    }
+  trace_resources.clear();
+  if (trace_cache)
+    trace_cache->clear();
+  smc_pending = 0;
+}
 
 void teardown_jit(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 {
@@ -897,6 +914,9 @@ int main(int argc, const char * argv[])
       // Service any pending timer/input interrupt between traces; this also
       // keeps keys fresh for ROMs that spin on skip_key traces.
       check_interrupt();
+
+      if (smc_pending)
+        invalidate_traces();
 
       // If escape or q(uit) has been pressed, exit
       if ((all_keys_down() & (1<<31)) || program_over)
