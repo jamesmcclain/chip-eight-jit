@@ -104,8 +104,6 @@ deliberately omitted.
       abstraction. Revisit only if a fourth backend appears or the helper set
       grows substantially.
 
-## Correctness
-
 - [x] **`clear_key` erases the quit bit (and all high bits).** In all three
       engines, `clear_key` does `keys_down[i] &= (0xffff ^ (1<<key))`. For any
       `key < 16` the mask's upper 16 bits are zero, so the AND wipes bits
