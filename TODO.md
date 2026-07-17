@@ -41,12 +41,11 @@ deliberately omitted.
       returned `errer` pointer is then stored in the trace cache as if it were
       a compiled trace. Consider failing more loudly at compile time instead
       of deferring to a cached crash-on-execute stub.
-- [ ] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
-      instruction.** When quit is pressed during a blocked key wait, both JIT
-      helpers set `program_over` without stepping the PC, while the
-      interpreter reports it via `ERROR` with a different exit status/message.
-      Harmless, but the three engines' final register/PC dumps differ for the
-      same input; worth unifying if the dumps are used for cross-checking.
+- [x] **`Fx0A` (`load_on_key`) quit path leaves the PC on the waiting
+      instruction.** When quit is pressed during a blocked key wait, all three
+      engines now report quit through the same `ERROR` path, keeping the PC on
+      the waiting instruction and aligning diagnostic/exit behavior for
+      cross-checking.
 
 ## Semantics / quirks
 

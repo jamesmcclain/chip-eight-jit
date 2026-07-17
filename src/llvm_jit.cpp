@@ -340,7 +340,7 @@ extern "C"
 
     if (all_keys & (1<<31))
       {
-        program_over = true;
+        ERROR;
       }
     else
       {
