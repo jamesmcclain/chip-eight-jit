@@ -211,8 +211,6 @@ deliberately omitted.
       quirk). Fine as a choice, but it's undocumented; add a quirks section
       to the README so ROM incompatibilities are explainable.
 
-## Build hygiene
-
 - [ ] **Header dependencies aren't tracked.** The pattern rule
       `%.o: %.c %.h` only fires when a same-named header exists
       (`chip8.o`, `ncurses_io.o` -- and the latter matches `io.h` not at all:
