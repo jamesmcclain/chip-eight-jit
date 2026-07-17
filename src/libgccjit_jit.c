@@ -258,7 +258,7 @@ void load_on_key()
 
   if (all_keys & (1<<31))
     {
-      program_over = 1;
+      errer();
     }
   else
     {
