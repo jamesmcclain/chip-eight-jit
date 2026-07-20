@@ -228,10 +228,16 @@ deliberately omitted.
 
 ## Cosmetics / consistency
 
-- [ ] **Register dump prints decimal indices.** `V%02d` in every engine's exit
-      dump prints `V10`..`V15` instead of `VA`..`VF`; `disas.c` similarly
-      prints `V%d`. Hex register names would match every CHIP-8 reference.
-- [ ] **Exit dumps differ across engines.** The libgccjit backend omits the
-      `stack[...]` line the other two print; the interpreter's
-      `stack[stack_pointer]` also reads one slot past the top of stack
-      (index equals the count, not the last pushed entry).
+- [x] **Register dump prints decimal indices.** `V%02d` in every engine's exit
+      dump printed `V10`..`V15` instead of `VA`..`VF`; `disas.c` similarly
+      printed `V%d`. *Fixed.* The shared exit-state dump and all disassembler
+      register formats now use uppercase hexadecimal (`V%X`), matching CHIP-8
+      register names.
+- [x] **Exit dumps differ across engines.** The libgccjit backend omitted the
+      `stack[...]` line the other two printed; the interpreter's
+      `stack[stack_pointer]` also read one slot past the top of stack
+      (index equals the count, not the last pushed entry). *Fixed.* A shared
+      `dump_chip8_state` routine now supplies all three backends' state output.
+      It prints the stack depth and, only for a nonempty stack, its top entry
+      at `stack[stack_pointer - 1]`, avoiding both the empty-stack fiction and
+      the full-stack out-of-bounds read.

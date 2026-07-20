@@ -50,105 +50,105 @@ uint32_t skip_eq_immediate()
 {
   X; IMMEDIATE8;
 
-  PC; fprintf(stdout, "skip next if V%d == 0x%04X\n", x, immediate); STEP;
+  PC; fprintf(stdout, "skip next if V%X == 0x%04X\n", x, immediate); STEP;
 }
 
 uint32_t skip_neq_immediate()
 {
   X; IMMEDIATE8;
 
-  PC; fprintf(stdout, "skip next if V%d != 0x%04X\n", x, immediate); STEP;
+  PC; fprintf(stdout, "skip next if V%X != 0x%04X\n", x, immediate); STEP;
 }
 
 uint32_t skip_eq_register()
 {
   X; Y;
 
-  PC; fprintf(stdout, "skip next if V%d == V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "skip next if V%X == V%X\n", x, y); STEP;
 }
 
 uint32_t load_immediate()
 {
   X; IMMEDIATE8;
 
-  PC; fprintf(stdout, "V%d = 0x%04X\n", x, immediate); STEP;
+  PC; fprintf(stdout, "V%X = 0x%04X\n", x, immediate); STEP;
 }
 
 uint32_t add_immediate()
 {
   X; IMMEDIATE8;
 
-  PC; fprintf(stdout, "V%d += 0x%04X\n", x, immediate); STEP;
+  PC; fprintf(stdout, "V%X += 0x%04X\n", x, immediate); STEP;
 }
 
 uint32_t move()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d = V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X = V%X\n", x, y); STEP;
 }
 
 uint32_t or()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d |= V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X |= V%X\n", x, y); STEP;
 }
 
 uint32_t and()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d &= V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X &= V%X\n", x, y); STEP;
 }
 
 uint32_t xor()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d ^= V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X ^= V%X\n", x, y); STEP;
 }
 
 uint32_t add_register()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d += V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X += V%X\n", x, y); STEP;
 }
 
 uint32_t sub_register()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d -= V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X -= V%X\n", x, y); STEP;
 }
 
 uint32_t shift_right()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d >>= V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X >>= V%X\n", x, y); STEP;
 }
 
 uint32_t subn_register()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d = V%d - V%d\n", x, y, x); STEP;;
+  PC; fprintf(stdout, "V%X = V%X - V%X\n", x, y, x); STEP;;
 }
 
 uint32_t shift_left()
 {
   X; Y;
 
-  PC; fprintf(stdout, "V%d <<= V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "V%X <<= V%X\n", x, y); STEP;
 }
 
 uint32_t skip_neq_register()
 {
   X; Y;
 
-  PC; fprintf(stdout, "skip next if V%d != V%d\n", x, y); STEP;
+  PC; fprintf(stdout, "skip next if V%X != V%X\n", x, y); STEP;
 }
 
 uint32_t load_addr_immediate()
@@ -169,84 +169,84 @@ uint32_t random_byte()
 {
   X; IMMEDIATE8;
 
-  PC; fprintf(stdout, "V%d = <random> & 0x%04X\n", x, immediate); STEP;
+  PC; fprintf(stdout, "V%X = <random> & 0x%04X\n", x, immediate); STEP;
 }
 
 uint32_t get_delay_timer()
 {
   X;
 
-  PC; fprintf(stdout, "V%d = <current delay timer>\n", x); STEP;
+  PC; fprintf(stdout, "V%X = <current delay timer>\n", x); STEP;
 }
 
 uint32_t set_delay_timer()
 {
   X;
 
-  PC; fprintf(stdout, "<current delay timer> = V%d\n", x); STEP;
+  PC; fprintf(stdout, "<current delay timer> = V%X\n", x); STEP;
 }
 
 uint32_t set_sound_timer()
 {
   X;
 
-  PC; fprintf(stdout, "<current sound timer> = V%d\n", x); STEP;
+  PC; fprintf(stdout, "<current sound timer> = V%X\n", x); STEP;
 }
 
 uint32_t add_addr()
 {
   X;
 
-  PC; fprintf(stdout, "addr += V%d\n", x); STEP;
+  PC; fprintf(stdout, "addr += V%X\n", x); STEP;
 }
 
 uint32_t store_bcd()
 {
   X;
 
-  PC; fprintf(stdout, "store V%d in BCD starting at addr\n", x); STEP;
+  PC; fprintf(stdout, "store V%X in BCD starting at addr\n", x); STEP;
 }
 
 uint32_t skip_key_x(int up)
 {
   X;
 
-  PC; fprintf(stdout, "skip next if V%d is %s\n", x, up? "up" : "down"); STEP;
+  PC; fprintf(stdout, "skip next if V%X is %s\n", x, up? "up" : "down"); STEP;
 }
 
 uint32_t load_on_key()
 {
   X;
 
-  PC; fprintf(stdout, "V%d = <next key pressed>\n", x); STEP;
+  PC; fprintf(stdout, "V%X = <next key pressed>\n", x); STEP;
 }
 
 uint32_t draw()
 {
   X; Y; IMMEDIATE4;
 
-  PC; fprintf(stdout, "draw sprite from addr of height %d at (V%d, V%d)\n", immediate, x, y); STEP;
+  PC; fprintf(stdout, "draw sprite from addr of height %d at (V%X, V%X)\n", immediate, x, y); STEP;
 }
 
 uint32_t save_registers()
 {
   X;
 
-  PC; fprintf(stdout, "save registers V0 through V%d starting at addr\n", x); STEP;
+  PC; fprintf(stdout, "save registers V0 through V%X starting at addr\n", x); STEP;
 }
 
 uint32_t restore_registers()
 {
   X;
 
-  PC; fprintf(stdout, "load registers V0 through V%d starting at addr\n", x); STEP;
+  PC; fprintf(stdout, "load registers V0 through V%X starting at addr\n", x); STEP;
 }
 
 uint32_t load_sprite_addr()
 {
   X;
 
-  PC; fprintf(stdout, "addr = <address of hex sprite V%d>\n", x); STEP;
+  PC; fprintf(stdout, "addr = <address of hex sprite V%X>\n", x); STEP;
 }
 
 uint32_t basic_block()

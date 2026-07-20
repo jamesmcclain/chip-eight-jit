@@ -35,6 +35,7 @@ extern uint16_t program_counter;
 
 void init_chip8();
 void deinit_chip8();
+void dump_chip8_state(const char *counter_label, int counter);
 
 #if defined(__cplusplus)
 }

@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <time.h>
 #include "chip8.h"
 
@@ -35,4 +36,23 @@ void init_chip8()
 
 void deinit_chip8()
 {
+}
+
+void dump_chip8_state(const char *counter_label, int counter)
+{
+  for (int i = 0; i < REGFILE_SIZE; ++i)
+    {
+      fprintf(stderr, "V%X = 0x%02X\n", i, regs[i]);
+    }
+  fprintf(stderr, "%d %s executed\n", counter, counter_label);
+  fprintf(stderr, "$pc = 0x%04X\n", program_counter);
+  fprintf(stderr, "$addr = 0x%04X\n", addr);
+  fprintf(stderr, "stack depth = %d\n", stack_pointer);
+  if (stack_pointer > 0)
+    {
+      fprintf(stderr, "stack[%d] = 0x%04X\n",
+              stack_pointer - 1, stack[stack_pointer - 1]);
+    }
+  fprintf(stderr, "delay = %d\n", delay_timer);
+  fprintf(stderr, "sound = %d\n", sound_timer);
 }
