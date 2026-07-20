@@ -591,16 +591,7 @@ int main(int argc, const char * argv[])
   deinit_io();
   deinit_chip8();
 
-  for (int i = 0; i < REGFILE_SIZE; ++i)
-    {
-      fprintf(stderr, "V%02d = 0x%02X\n", i, regs[i]);
-    }
-  fprintf(stderr, "%d chip-8 instructions executed\n", inst_count);
-  fprintf(stderr, "$pc = 0x%04X\n", program_counter);
-  fprintf(stderr, "$addr = 0x%04X\n", addr);
-  fprintf(stderr, "stack[%d] = 0x%04X\n", stack_pointer, stack[stack_pointer]);
-  fprintf(stderr, "delay = %d\n", delay_timer);
-  fprintf(stderr, "sound = %d\n", sound_timer);
+  dump_chip8_state("chip-8 instructions", inst_count);
 
   exit(0);
 }
