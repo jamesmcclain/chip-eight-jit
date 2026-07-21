@@ -211,14 +211,21 @@ deliberately omitted.
       quirk). Fine as a choice, but it's undocumented; add a quirks section
       to the README so ROM incompatibilities are explainable.
 
-- [ ] **Header dependencies aren't tracked.** The pattern rule
+- [x] **Header dependencies aren't tracked.** ~~The pattern rule
       `%.o: %.c %.h` only fires when a same-named header exists
       (`chip8.o`, `ncurses_io.o` -- and the latter matches `io.h` not at all:
       `ncurses_io.h` doesn't exist, so it falls back to the built-in rule).
       `interp.o`, `disas.o`, and the JIT objects don't rebuild when `chip8.h`
       or `io.h` change, which is exactly the kind of stale-build that hides
       cross-engine divergence. Use `-MMD -MP` generated deps or list headers
-      explicitly.
+      explicitly.~~ *Fixed.* Added `DEPFLAGS = -MMD -MP` to `Makefile`,
+      appended it to `CFLAGS`/`CXXFLAGS` so each compile emits a `*.d` file,
+      removed the broken `%.o: %.c %.h` pattern rule (now using the built-in
+      implicit rule with dep flags), and added `-include $(wildcard *.d)` at
+      the bottom plus `*.d` to `clean`. Verified: `touch chip8.h && make -n`
+      now rebuilds `chip8.o`, `interp.o`, `llvm_jit.o`, `libgccjit_jit.o`;
+      `touch io.h` rebuilds `ncurses_io.o` and dependents. Full rebuild
+      clean under both plain and libgccjit-flagged invocations.
 - [ ] **Dead/unused includes and warnings.** `arpa/inet.h` and `signal.h` are
       included in all engines but unused (likely leftovers from an
       `htons`-based fetch). `io.h` uses `uint8_t`/`uint32_t` without including
