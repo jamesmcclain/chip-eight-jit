@@ -226,12 +226,22 @@ deliberately omitted.
       now rebuilds `chip8.o`, `interp.o`, `llvm_jit.o`, `libgccjit_jit.o`;
       `touch io.h` rebuilds `ncurses_io.o` and dependents. Full rebuild
       clean under both plain and libgccjit-flagged invocations.
-- [ ] **Dead/unused includes and warnings.** `arpa/inet.h` and `signal.h` are
+- [x] **Dead/unused includes and warnings.** ~~`arpa/inet.h` and `signal.h` are
       included in all engines but unused (likely leftovers from an
       `htons`-based fetch). `io.h` uses `uint8_t`/`uint32_t` without including
       `<stdint.h>` itself, so it only compiles because every includer happens
       to pull `chip8.h` first. Compiling with `-Wextra` also flags a few
-      sign-comparison nits worth cleaning.
+      sign-comparison nits worth cleaning.~~ *Fixed.* Removed dead
+      `arpa/inet.h` from `interp.c`, `llvm_jit.cpp`, `libgccjit_jit.c`,
+      `disas.c`; removed dead `signal.h` from `interp.c` (kept in both JITs
+      where `sigaction(SIGALRM)` is actually used). Added `#include <stdint.h>`
+      to `io.h` so it is self-contained (`echo '#include "io.h"' | gcc -c`
+      now succeeds). Fixed `-Wimplicit-fallthrough` in `interp.c`, `disas.c`,
+      `llvm_jit.cpp` by restructuring the outer `Fx` fallthrough to `ERROR` and
+      annotating intentional inner-switch fallthroughs with
+      `__attribute__((fallthrough))`. Verified `make` clean with `-Wall -Wextra`
+      on project files (LLVM header noise excluded) and full 4-target rebuild
+      with libgccjit flags.
 
 ## Cosmetics / consistency
 

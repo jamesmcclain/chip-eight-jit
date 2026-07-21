@@ -1,6 +1,8 @@
 #ifndef __IO_H__
 #define __IO_H__
 
+#include <stdint.h>
+
 #define DISPLAY_SIZE (128*64)
 
 #if defined(__cplusplus)
