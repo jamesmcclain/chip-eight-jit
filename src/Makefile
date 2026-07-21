@@ -1,4 +1,6 @@
-CFLAGS ?= -Wall -O -g
+DEPFLAGS = -MMD -MP
+CFLAGS ?= -Wall -O -g $(DEPFLAGS)
+CXXFLAGS += $(DEPFLAGS)
 CC = gcc
 CXX = g++
 CXXSTD = -std=c++17
@@ -26,11 +28,10 @@ llvm_jit.o: llvm_jit.cpp
 libgccjit_jit.o: libgccjit_jit.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $< -c -o $@
 
-%.o: %.c %.h
-	$(CC) $(CFLAGS) $< -c -o $@
-
 clean:
-	rm -f *.o
+	rm -f *.o *.d
 
 cleanest: clean
 	rm -f chip8-interp chip8-llvm chip8-libgccjit chip8-disas
+
+-include $(wildcard *.d)

@@ -1,11 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-
-#include <arpa/inet.h>
 
 #include "chip8.h"
 #include "io.h"
@@ -509,6 +506,7 @@ uint32_t basic_block()
           default:
             ERROR;
           }
+        break; // silence -Wimplicit-fallthrough; ERROR returns
       }
     case 0xf:
       {
@@ -532,8 +530,12 @@ uint32_t basic_block()
             return save_registers();
           case 0x65:
             return restore_registers();
+          default:
+            break; // fall through to outer default -> ERROR
           }
+        __attribute__((fallthrough));
       }
+      // fall through
     default:
       ERROR;
     }

@@ -5,8 +5,6 @@
 #include <unistd.h>
 #include <time.h>
 
-#include <arpa/inet.h>
-
 #include <libgccjit.h>
 
 #include "chip8.h"

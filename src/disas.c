@@ -2,8 +2,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <arpa/inet.h>
-
 #define ENTRYPOINT (0x200)
 #define MEMORY_SIZE (0x1000)
 
@@ -309,7 +307,7 @@ uint32_t basic_block()
           case 0xe:
             return shift_left();
           default:
-            PC; ERROR;
+            PC; ERROR; STEP;
           }
       }
     case 0x9:
@@ -333,6 +331,7 @@ uint32_t basic_block()
           default:
             PC; ERROR; STEP;
           }
+        __attribute__((fallthrough));
       }
     case 0xf:
       {
@@ -356,7 +355,10 @@ uint32_t basic_block()
             return save_registers();
           case 0x65:
             return restore_registers();
+          default:
+            break; // unknown Fx: fall through to error
           }
+        __attribute__((fallthrough));
       }
     default:
       PC; ERROR; STEP;

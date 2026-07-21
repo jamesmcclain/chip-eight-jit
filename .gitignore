@@ -3,6 +3,7 @@ roms/
 *.howto
 *.asm
 *.o
+*.d
 chip8-interp
 chip8-disas
 chip8-llvm

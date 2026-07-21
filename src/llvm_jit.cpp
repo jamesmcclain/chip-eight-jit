@@ -5,8 +5,6 @@
 #include <unistd.h>
 #include <time.h>
 
-#include <arpa/inet.h>
-
 #include "chip8.h"
 #include "io.h"
 
@@ -791,7 +789,11 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 JIT_CALL("restore_registers");
                 JIT_STEP;
               }
+            default:
+              fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+              return nullptr;
             }
+          break; // inner Fx switch done
         }
       default:
         fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
