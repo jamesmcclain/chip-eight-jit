@@ -621,7 +621,7 @@ code codegen(void)
                   gcc_jit_rvalue *vx = snapshot(ctx, function, blk, t_u8, t_u8p, &regs[x], local_id++);
                   gcc_jit_rvalue *vy = snapshot(ctx, function, blk, t_u8, t_u8p, &regs[y], local_id++);
                   gcc_jit_rvalue *gt = gcc_jit_context_new_comparison(ctx, NULL,
-                    GCC_JIT_COMPARISON_GT, vx, vy);
+                    GCC_JIT_COMPARISON_GE, vx, vy);
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &regs[0xf]),
                     gcc_jit_context_new_cast(ctx, NULL, gt, t_u8));
                   gcc_jit_block_add_assignment(blk, NULL, rx,
@@ -643,7 +643,7 @@ code codegen(void)
                   gcc_jit_rvalue *vx = snapshot(ctx, function, blk, t_u8, t_u8p, &regs[x], local_id++);
                   gcc_jit_rvalue *vy = snapshot(ctx, function, blk, t_u8, t_u8p, &regs[y], local_id++);
                   gcc_jit_rvalue *gt = gcc_jit_context_new_comparison(ctx, NULL,
-                    GCC_JIT_COMPARISON_GT, vy, vx);
+                    GCC_JIT_COMPARISON_GE, vy, vx);
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &regs[0xf]),
                     gcc_jit_context_new_cast(ctx, NULL, gt, t_u8));
                   gcc_jit_block_add_assignment(blk, NULL, rx,

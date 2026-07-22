@@ -196,11 +196,19 @@ deliberately omitted.
       the `%0x04X` typo is corrected to `%04X`, and the unknown-opcode path
       prints the PC alongside the opcode.
 
-- [ ] **`8xy5/8xy7` borrow flag on equality.** All three engines set
+- [x] **`8xy5/8xy7` borrow flag on equality.** All three engines set
       `VF = (Vx > Vy)` (strict), so `Vx == Vy` yields `VF = 0`. The
       conventional semantics is "VF = NOT borrow", i.e. `Vx >= Vy` sets
       `VF = 1`. Most test ROMs (e.g. the Timendus quirks suite) expect the
       `>=` behavior; verify against one and fix or document.
+      *Fixed.* Changed the interpreter comparisons to `>=`, LLVM's unsigned
+      predicates from `ICMP_UGT` to `ICMP_UGE`, and libgccjit's comparisons
+      from `GCC_JIT_COMPARISON_GT` to `GCC_JIT_COMPARISON_GE`, for both
+      `8xy5` and `8xy7`. Equality micro-ROMs (`roms/eq_sub.ch8` and
+      `roms/eq_subn.ch8`) now yield `V0=0x00, VF=0x01` on all three engines.
+      The Timendus `4-flags.ch8` screen and final machine state also agree
+      across all three backends; only their expected instruction-vs-trace
+      execution-counter line differs.
 - [ ] **`Dxyn` wraps sprites instead of clipping.** `draw_io` applies
       `% width` / `% height` per pixel, so sprites that run off the right or
       bottom edge wrap around. The common quirk expectation is: wrap the

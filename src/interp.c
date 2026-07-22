@@ -213,7 +213,7 @@ uint32_t sub_register()
   X; Y;
 
   uint8_t vx = regs[x], vy = regs[y];
-  FLAGS = (vx > vy) ? 1 : 0;
+  FLAGS = (vx >= vy) ? 1 : 0;
   regs[x] = vx - vy;
   STEP;
 }
@@ -235,7 +235,7 @@ uint32_t subn_register()
   X; Y;
 
   uint8_t vx = regs[x], vy = regs[y];
-  FLAGS = (vy > vx) ? 1 : 0;
+  FLAGS = (vy >= vx) ? 1 : 0;
   regs[x] = vy - vx;
   STEP;
 }
