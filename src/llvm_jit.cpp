@@ -613,9 +613,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 auto sum16_value = builder->CreateAdd(x16_value, y16_value);
                 auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_SGT, sum16_value, eff_eff);
                 auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
-                builder->CreateStore(cmp8_value, JIT_PTR(f));
                 auto sum8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(sum16_value, false, int8ty, false), sum16_value, int8ty);
                 builder->CreateStore(sum8_value, x_ptr);
+                builder->CreateStore(cmp8_value, JIT_PTR(f));
                 JIT_STEP;
               }
             case 0x5:
@@ -624,11 +624,11 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 int f = 0xf; JIT_GETPTRREG(f);
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGT, JIT_VALUE(x), JIT_VALUE(y));
+                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE(x), JIT_VALUE(y));
                 auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
-                builder->CreateStore(cmp8_value, JIT_PTR(f));
                 auto diff_value = builder->CreateSub(JIT_VALUE(x), JIT_VALUE(y));
                 builder->CreateStore(diff_value, JIT_PTR(x));
+                builder->CreateStore(cmp8_value, JIT_PTR(f));
                 JIT_STEP;
               }
             case 0x6:
@@ -637,10 +637,10 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 int f = 0xf; JIT_GETPTRREG(f);
                 auto andone_value = builder->CreateAnd(JIT_VALUE(x), 0x01);
-                builder->CreateStore(andone_value, JIT_PTR(f));
                 auto shr_value = builder->CreateLShr(JIT_VALUE(x), 1);
                 auto shr8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(shr_value, false, int8ty, false), shr_value, int8ty);
                 builder->CreateStore(shr8_value, JIT_PTR(x));
+                builder->CreateStore(andone_value, JIT_PTR(f));
                 JIT_STEP;
               }
             case 0x7:
@@ -649,11 +649,11 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 int f = 0xf; JIT_GETPTRREG(f);
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
                 Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGT, JIT_VALUE(y), JIT_VALUE(x));
+                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE(y), JIT_VALUE(x));
                 auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
-                builder->CreateStore(cmp8_value, JIT_PTR(f));
                 auto diff_value = builder->CreateSub(JIT_VALUE(y), JIT_VALUE(x));
                 builder->CreateStore(diff_value, JIT_PTR(x));
+                builder->CreateStore(cmp8_value, JIT_PTR(f));
                 JIT_STEP;
               }
             case 0xe:
@@ -662,9 +662,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
                 int f = 0xf; JIT_GETPTRREG(f);
                 auto andeight_value = builder->CreateAnd(JIT_VALUE(x), 0x80);
                 auto msb_value = builder->CreateLShr(andeight_value, 7);
-                builder->CreateStore(msb_value, JIT_PTR(f));
                 auto shl_value = builder->CreateShl(JIT_VALUE(x), 1);
                 builder->CreateStore(shl_value, JIT_PTR(x));
+                builder->CreateStore(msb_value, JIT_PTR(f));
                 JIT_STEP;
               }
             default:
