@@ -66,7 +66,7 @@ stderr.
 
 ## Testing
 
-Two helper scripts in `src/` drive the engines under a pty and capture
+Two helper scripts in `scripts/` drive the engines under a pty and capture
 results, since ROMs do not terminate on their own and the display is
 ncurses. Both send `q` to quit and SIGKILL the child as a safety net so the
 tool always returns.
@@ -86,8 +86,8 @@ tool always returns.
   frame-drawing ROMs; use `--hold` for spin loops, which aren't tick-paced).
 
 ```sh
-python3 src/run_dump.py src/chip8-interp roms/eq_sub.ch8          # register dump only
-python3 src/screen_dump.py src/chip8-interp roms/test-roms/4-flags.ch8 --keys 0 --ticks 180
+python3 scripts/run_dump.py src/chip8-interp roms/eq_sub.ch8          # register dump only
+python3 scripts/screen_dump.py src/chip8-interp roms/test-roms/4-flags.ch8 --keys 0 --ticks 180
 ```
 
 ## Layout
