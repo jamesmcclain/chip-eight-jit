@@ -188,15 +188,28 @@ deliberately omitted.
       The Timendus `4-flags.ch8` screen and final machine state also agree
       across all three backends; only their expected instruction-vs-trace
       execution-counter line differs.
-- [ ] **`Dxyn` wraps sprites instead of clipping.** `draw_io` applies
+- [x] **`Dxyn` wraps sprites instead of clipping.** ~~`draw_io` applies
       `% width` / `% height` per pixel, so sprites that run off the right or
       bottom edge wrap around. The common quirk expectation is: wrap the
       *starting* coordinate, then clip the sprite at the edges. Decide which
-      behavior is intended and note it in the README.
-- [ ] **`8xy6/8xyE` ignore `Vy`.** The interpreter has the `Vy` variants
+      behavior is intended and note it in the README.~~ *Fixed.*
+      `draw_io` in `ncurses_io.c` now does `x %= width; y %= height;` once and
+      then clips per-pixel (`if x+i >= width continue`, same for `y`). Old
+      per-pixel modulo wrap caused sprites at e.g. x=60 to reappear on the
+      left edge. All three backends share this path. The choice and rationale
+      are documented in the new Quirks section in `README.md`. Verified with
+      `5-quirks.ch8` screen dump (interpreter) which now shows consistent
+      clipping behavior.
+- [x] **`8xy6/8xyE` ignore `Vy`.** ~~The interpreter has the `Vy` variants
       commented out and both JITs shift `Vx` in place (the "modern"/SCHIP
       quirk). Fine as a choice, but it's undocumented; add a quirks section
-      to the README so ROM incompatibilities are explainable.
+      to the README so ROM incompatibilities are explainable.~~ *Fixed.*
+      Kept modern/SCHIP semantics (`Vx >>= 1`, `Vx <<= 1`, ignore `Vy`) -- all
+      three backends already agree and Timendus `5-quirks.ch8` expects it.
+      Original COSMAC VIP behavior (`Vx = Vy >> 1`) noted in comments. Added a
+      `## Quirks / Compatibility Notes` table to `README.md` covering
+      `8xy6/8xyE`, `Dxyn`, `VF` ordering, borrow flag, `MEM_AT` wrap, `Bnnn`,
+      and timers.
 
 - [x] **Header dependencies aren't tracked.** ~~The pattern rule
       `%.o: %.c %.h` only fires when a same-named header exists

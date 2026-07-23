@@ -39,14 +39,25 @@ int draw_io(int x, int y, int n, uint8_t* mem)
 {
   int vf = 0;
 
+  /* Common modern quirk: wrap the starting coordinate, then clip the
+     sprite at the edges.  The old code wrapped every pixel (% width /
+     % height), so a sprite running off the right edge reappeared on
+     the left.  Now we wrap once and discard off-screen pixels. */
+  x %= width;
+  y %= height;
+
   for (int j = 0; j < n; ++j)
     {
-      int y2 = (j + y) % height;
+      int y2 = j + y;
+      if (y2 >= height)
+        continue;
       uint8_t byte = mem[j];
 
       for (int i = 0; i < 8; ++i)
         {
-          int x2 = (i + x) % width;
+          int x2 = i + x;
+          if (x2 >= width)
+            continue;
           int bit = (byte & (0x80>>i)) ? 1: 0;
           int old_pixel = display[x2 + y2*width];
           int new_pixel = old_pixel ^ bit;
