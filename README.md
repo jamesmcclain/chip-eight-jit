@@ -90,6 +90,22 @@ python3 scripts/run_dump.py src/chip8-interp roms/eq_sub.ch8          # register
 python3 scripts/screen_dump.py src/chip8-interp roms/test-roms/4-flags.ch8 --keys 0 --ticks 180
 ```
 
+## Quirks / Compatibility Notes
+
+CHIP-8 has several well-known compatibility splits. This emulator makes explicit
+choices for interoperability with modern test ROMs (especially the Timendus
+suite). All three execution backends agree on these:
+
+| Opcode / area | Choice | Notes |
+|---|---|---|
+| `8xy6` / `8xyE` (shift) | **Modern / SCHIP**: shift `Vx` in place, ignore `Vy` | Original COSMAC VIP copied `Vy` into `Vx` then shifted (`regs[x]=regs[y]; regs[x]>>=1`). The interpreter comment `/* Y; */` and both JIT backends intentionally implement the modern quirk. Documented as a choice, not a bug. |
+| `Dxyn` (draw) | **Wrap-start + clip**: `x %= 64`, `y %= 32`, then clip sprite pixels that would go off the right / bottom edge | Old behavior wrapped every pixel (`x2=(x+i)%W, y2=(y+j)%H`). Quirks suite `5-quirks` expects clipping; now fixed in `draw_io` shared by all backends. |
+| `8xy4/5/6/7/E` with `x==F` | **Snapshot then result-then-flag**: operands snapshotted, result stored to `Vx`, `VF` stored last so flag wins | Required by `4-flags.ch8`. |
+| `8xy5/8xy7` borrow | **NOT-borrow**: `VF = Vx >= Vy` (or `Vy >= Vx`) | Many ROMs expect `>=`, not strict `>`. |
+| `Fx55/Fx65`, `Fx33`, `Dxyn` + `Annn`/`Fx1E` | **12-bit wrap via `MEM_AT`**: address masked with `0xFFF` | COSMAC VIP 12-bit wrap; also prevents OOB host access. |
+| `Bnnn` | `PC = nnn + V0` with zero-extend | LLVM backend previously failed to extend `V0`. |
+| Timers | `uint8_t`, 0..255, decrement only when >0 | Signed timers previously hung on values >127. |
+
 ## Layout
 
 All source lives in `src/`. See `TODO.md` for known issues and unfinished work,
