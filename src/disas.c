@@ -114,7 +114,6 @@ int main(int argc, const char *argv[])
   fclose(fp);
   for (unsigned pc = ENTRYPOINT; pc + 1 < ENTRYPOINT + size; pc += 2) {
     uint16_t op = (uint16_t)((memory[pc] << 8) | memory[pc + 1]);
-    if (op == 0) break;
     disassemble(pc, op);
   }
   return 0;

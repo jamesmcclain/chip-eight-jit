@@ -80,7 +80,7 @@ later: LD I, start
 
 def test_disassembler_asm_round_trip():
     # Includes non-zero y nibbles in shifts, which must survive the round trip.
-    original = bytes.fromhex("8126 8abe 00e0 f155 d345")
+    original = bytes.fromhex("8126 0000 8abe 00e0 f155 d345")
     with tempfile.NamedTemporaryFile("wb") as rom:
         rom.write(original)
         rom.flush()
@@ -90,6 +90,12 @@ def test_disassembler_asm_round_trip():
         text.flush()
         rebuilt = subprocess.check_output([ASM, text.name])
     assert rebuilt == original
+    # The human-readable mode must also continue after an all-zero word.
+    with tempfile.NamedTemporaryFile("wb") as rom:
+        rom.write(original)
+        rom.flush()
+        prose = subprocess.check_output([DISAS, rom.name], text=True)
+    assert "0x0204:" in prose
 
 
 def test_failures():
