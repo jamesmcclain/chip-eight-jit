@@ -9,7 +9,7 @@
 
 #define ENTRYPOINT 0x200
 #define MEMORY_SIZE 0x1000
-#define MAX_SYMBOLS 512
+#define MAX_SYMBOLS 2048 /* enough for a label on every word in a 4 KiB ROM */
 #define MAX_TOKENS 260
 #define MAX_LINE 1024
 

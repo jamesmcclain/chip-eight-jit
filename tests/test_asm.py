@@ -98,6 +98,51 @@ def test_disassembler_asm_round_trip():
     assert "0x0204:" in prose
 
 
+def test_disassembler_basic_blocks():
+    # JP forward; skip over one instruction; backward loop; trailing RET.
+    original = bytes.fromhex("120a 6001 3001 6002 6003 1202 00ee")
+    with tempfile.NamedTemporaryFile("wb") as rom:
+        rom.write(original)
+        rom.flush()
+        source = subprocess.check_output([DISAS, "--asm", rom.name], text=True)
+    # Leaders: entry point, JP target, both skip paths, and the post-RET block.
+    for label in ("block200", "block202", "block206", "block208", "block20A", "block20C"):
+        assert f"{label}:" in source, label
+    # Control-flow operands reference the labels symbolically.
+    assert "JP block20A" in source
+    assert "JP block202" in source
+    # The labeled output must still round-trip to identical bytes.
+    with tempfile.NamedTemporaryFile("w", suffix=".asm") as text:
+        text.write(source)
+        text.flush()
+        rebuilt = subprocess.check_output([ASM, text.name])
+    assert rebuilt == original
+
+
+def test_disassembler_odd_size_round_trip():
+    # Odd-sized ROM: the trailing byte must survive the round trip.
+    original = bytes.fromhex("1204 00ee 6001 ff")
+    with tempfile.NamedTemporaryFile("wb") as rom:
+        rom.write(original)
+        rom.flush()
+        source = subprocess.check_output([DISAS, "--asm", rom.name], text=True)
+    assert ".byte 0xFF" in source
+    with tempfile.NamedTemporaryFile("w", suffix=".asm") as text:
+        text.write(source)
+        text.flush()
+        rebuilt = subprocess.check_output([ASM, text.name])
+    assert rebuilt == original
+
+
+def test_disassembler_indirect_jump_warning():
+    original = bytes.fromhex("b220 00ee")
+    with tempfile.NamedTemporaryFile("wb") as rom:
+        rom.write(original)
+        rom.flush()
+        source = subprocess.check_output([DISAS, "--asm", rom.name], text=True)
+    assert "WARNING: indirect jump" in source
+
+
 def test_failures():
     assert "undefined symbol" in assemble("JP missing\n", okay=False)
     assert "duplicate label" in assemble("a: CLS\na: RET\n", okay=False)
@@ -109,5 +154,8 @@ if __name__ == "__main__":
     test_instructions()
     test_labels_data_and_org()
     test_disassembler_asm_round_trip()
+    test_disassembler_basic_blocks()
+    test_disassembler_odd_size_round_trip()
+    test_disassembler_indirect_jump_warning()
     test_failures()
     print("chip8-asm tests: OK")

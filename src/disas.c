@@ -10,6 +10,45 @@
 
 static uint8_t memory[MEMORY_SIZE];
 static bool assembly_output;
+static bool leader[MEMORY_SIZE]; /* address starts a basic block */
+
+/* A label can only be referenced/emitted for an in-ROM, 2-byte aligned address. */
+static bool labelable(unsigned addr, size_t size)
+{
+  return addr >= ENTRYPOINT && addr + 1 < ENTRYPOINT + size && !(addr & 1);
+}
+
+/* Classic leader analysis: entry point, static branch/call targets, and
+   instructions following a control-flow transfer all start basic blocks.
+   Bnnn (JP V0, nnn) is a computed jump; its targets cannot be found
+   statically, so analysis may be incomplete for ROMs using jump tables. */
+static void analyze(size_t size)
+{
+  unsigned end = ENTRYPOINT + size;
+  leader[ENTRYPOINT] = true;
+  for (unsigned pc = ENTRYPOINT; pc + 1 < end; pc += 2) {
+    uint16_t op = (uint16_t)((memory[pc] << 8) | memory[pc + 1]);
+    unsigned nnn = op & 0xfff, kk = op & 0xff, n = op & 0xf;
+    bool skip = false, ends_block = false;
+    switch (op >> 12) {
+    case 0x0: if (op == 0x00ee) ends_block = true; break;
+    case 0x1:
+      if (labelable(nnn, size)) leader[nnn] = true;
+      ends_block = true;
+      break;
+    case 0x2: if (labelable(nnn, size)) leader[nnn] = true; break;
+    case 0x3: case 0x4: skip = true; break;
+    case 0x5: case 0x9: if (n == 0) skip = true; break;
+    case 0xb: ends_block = true; break; /* computed jump: targets unknown */
+    case 0xe: if (kk == 0x9e || kk == 0xa1) skip = true; break;
+    }
+    if (skip) { /* fall-through and taken (pc+4) paths both start blocks */
+      if (pc + 2 < end) leader[pc + 2] = true;
+      if (pc + 4 < end) leader[pc + 4] = true;
+    }
+    if (ends_block && pc + 2 < end) leader[pc + 2] = true;
+  }
+}
 
 static void output(unsigned pc, const char *format, ...)
 {
@@ -46,8 +85,12 @@ static void disassemble(unsigned pc, uint16_t op)
     if (assembly_output) raw_word(pc, op); /* SYS is unsupported by this emulator. */
     else output(pc, "jump 0x%04X", nnn);
     return;
-  case 0x1: BOTH("JP 0x%03X", "jump 0x%04X", nnn);
-  case 0x2: BOTH("CALL 0x%03X", "call 0x%04X", nnn);
+  case 0x1:
+    if (assembly_output && leader[nnn]) { output(pc, "JP block%03X", nnn); return; }
+    BOTH("JP 0x%03X", "jump 0x%04X", nnn);
+  case 0x2:
+    if (assembly_output && leader[nnn]) { output(pc, "CALL block%03X", nnn); return; }
+    BOTH("CALL 0x%03X", "call 0x%04X", nnn);
   case 0x3: BOTH("SE V%X, 0x%02X", "skip next if V%X == 0x%04X", x, kk);
   case 0x4: BOTH("SNE V%X, 0x%02X", "skip next if V%X != 0x%04X", x, kk);
   case 0x5:
@@ -71,8 +114,14 @@ static void disassemble(unsigned pc, uint16_t op)
   case 0x9:
     if (n == 0 || !assembly_output) BOTH("SNE V%X, V%X", "skip next if V%X != V%X", x, y);
     raw_word(pc, op); return;
-  case 0xa: BOTH("LD I, 0x%03X", "addr = 0x%04X", nnn);
-  case 0xb: BOTH("JP V0, 0x%03X", "branch to 0x%04X + V0", nnn);
+  case 0xa:
+    if (assembly_output && leader[nnn]) { output(pc, "LD I, block%03X", nnn); return; }
+    BOTH("LD I, 0x%03X", "addr = 0x%04X", nnn);
+  case 0xb:
+    if (assembly_output)
+      output(pc, "JP V0, 0x%03X ; WARNING: indirect jump, block analysis may be incomplete", nnn);
+    else output(pc, "branch to 0x%04X + V0", nnn);
+    return;
   case 0xc: BOTH("RND V%X, 0x%02X", "V%X = <random> & 0x%04X", x, kk);
   case 0xd: BOTH("DRW V%X, V%X, 0x%X", "draw sprite from addr of height %d at (V%X, V%X)", x, y, n);
   case 0xe:
@@ -112,9 +161,18 @@ int main(int argc, const char *argv[])
   size_t size = fread(memory + ENTRYPOINT, 1, MEMORY_SIZE - ENTRYPOINT, fp);
   if (ferror(fp)) { fprintf(stderr, "Could not read ROM\n"); fclose(fp); return 1; }
   fclose(fp);
+  analyze(size);
   for (unsigned pc = ENTRYPOINT; pc + 1 < ENTRYPOINT + size; pc += 2) {
     uint16_t op = (uint16_t)((memory[pc] << 8) | memory[pc + 1]);
+    if (assembly_output && leader[pc]) fprintf(stdout, "block%03X:\n", pc);
     disassemble(pc, op);
+  }
+  if (size & 1) { /* odd-sized ROM: preserve the trailing byte */
+    unsigned pc = ENTRYPOINT + size - 1;
+    if (assembly_output) {
+      if (leader[pc]) fprintf(stdout, "block%03X:\n", pc);
+      fprintf(stdout, "        .byte 0x%02X\n", memory[pc]);
+    } else output(pc, "trailing byte %02X at pc 0x%04X", memory[pc], pc);
   }
   return 0;
 }
