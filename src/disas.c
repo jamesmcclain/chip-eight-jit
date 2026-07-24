@@ -12,6 +12,7 @@ static uint8_t memory[MEMORY_SIZE];
 static bool assembly_output;
 static bool report;
 static bool assume_no_smc;
+static bool decode_unreachable; /* decode dead regions as instructions (old behavior) */
 static bool smc_possible;
 static bool indirect_jump_seen;
 static bool leader[MEMORY_SIZE]; /* address starts a basic block */
@@ -306,12 +307,13 @@ int main(int argc, const char *argv[])
     if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--asm")) assembly_output = true;
     else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--report")) report = true;
     else if (!strcmp(argv[i], "--assume-no-smc")) assume_no_smc = true;
+    else if (!strcmp(argv[i], "--decode-unreachable")) decode_unreachable = true;
     else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-      fprintf(stderr, "Usage: %s [-a|--asm] [-r|--report] [--assume-no-smc] <rom>\n", argv[0]); return 0;
+      fprintf(stderr, "Usage: %s [-a|--asm] [-r|--report] [--assume-no-smc] [--decode-unreachable] <rom>\n", argv[0]); return 0;
     } else if (!rom) rom = argv[i];
-    else { fprintf(stderr, "Usage: %s [-a|--asm] [-r|--report] [--assume-no-smc] <rom>\n", argv[0]); return 2; }
+    else { fprintf(stderr, "Usage: %s [-a|--asm] [-r|--report] [--assume-no-smc] [--decode-unreachable] <rom>\n", argv[0]); return 2; }
   }
-  if (!rom) { fprintf(stderr, "Usage: %s [-a|--asm] [-r|--report] [--assume-no-smc] <rom>\n", argv[0]); return 2; }
+  if (!rom) { fprintf(stderr, "Usage: %s [-a|--asm] [-r|--report] [--assume-no-smc] [--decode-unreachable] <rom>\n", argv[0]); return 2; }
   FILE *fp = fopen(rom, "rb");
   if (!fp) { fprintf(stderr, "Could not open ROM %s\n", rom); return 1; }
   size_t size = fread(memory + ENTRYPOINT, 1, MEMORY_SIZE - ENTRYPOINT, fp);
@@ -320,10 +322,23 @@ int main(int argc, const char *argv[])
   analyze(size);
   descend(size);
   glue_unreachable(size);
+  /* By default, treat unreachable bytes as data: they cannot execute on
+     any static path, so decoding them as instructions is speculative
+     fiction.  --decode-unreachable recovers the old behavior of
+     disassembling them anyway (they then classify as "unknown"). */
+  if (!decode_unreachable)
+    for (unsigned a = ENTRYPOINT; a < ENTRYPOINT + size && a < MEMORY_SIZE; ++a)
+      if (class[a] == 0) class[a] = 2;
   if (report) print_report(size);
   for (unsigned pc = ENTRYPOINT; pc + 1 < ENTRYPOINT + size; pc += 2) {
     uint16_t op = (uint16_t)((memory[pc] << 8) | memory[pc + 1]);
     if (assembly_output && leader[pc]) fprintf(stdout, "block%03X:\n", pc);
+    if (!decode_unreachable && !reach[pc]) { /* dead word: emit as data */
+      if (assembly_output)
+        fprintf(stdout, "        .word 0x%04X ; data (unreachable)\n", op);
+      else output(pc, "data word %04X", op);
+      continue;
+    }
     disassemble(pc, op);
   }
   if (size & 1) { /* odd-sized ROM: preserve the trailing byte */

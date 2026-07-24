@@ -148,9 +148,24 @@ def test_unreachable_blocks_are_glued():
     assert "block206:" in source
     assert "JP block206" in source
     assert "block204:" not in source
-    assert "; unreachable" in source
+    # By default the dead region is emitted as data words, not instructions.
+    assert ".word 0x00EE ; data (unreachable)" in source
+    assert "        RET" not in source
     with tempfile.NamedTemporaryFile("w", suffix=".asm") as text:
         text.write(source)
+        text.flush()
+        rebuilt = subprocess.check_output([ASM, text.name])
+    assert rebuilt == original
+    # --decode-unreachable recovers the old decode-as-instructions behavior.
+    with tempfile.NamedTemporaryFile("wb") as rom:
+        rom.write(original)
+        rom.flush()
+        decoded = subprocess.check_output(
+            [DISAS, "--asm", "--decode-unreachable", rom.name], text=True)
+    assert "RET ; unreachable" in decoded
+    assert ".word 0x00EE" not in decoded
+    with tempfile.NamedTemporaryFile("w", suffix=".asm") as text:
+        text.write(decoded)
         text.flush()
         rebuilt = subprocess.check_output([ASM, text.name])
     assert rebuilt == original
