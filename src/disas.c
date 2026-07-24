@@ -156,6 +156,26 @@ static void descend(size_t size)
   }
 }
 
+/* Glue unreachable basic blocks: within each maximal run of unreachable
+   bytes, clear every leader except the one at the run's start.  Splits
+   inside dead regions are speculative artifacts of context-free leader
+   analysis (the bytes may not even be instructions).  This is sound
+   because any target of reachable code is itself reachable, so no live
+   reference can point into the middle of a glued run.  Indirect JP V0
+   jumps can in principle land anywhere, which is why the report flags
+   the analysis as incomplete when one is seen. */
+static void glue_unreachable(size_t size)
+{
+  unsigned end = ENTRYPOINT + size;
+  for (unsigned pc = ENTRYPOINT; pc < end;) {
+    if (reach[pc]) { ++pc; continue; }
+    unsigned start = pc;
+    while (pc < end && !reach[pc]) ++pc;
+    if (labelable(start, size)) leader[start] = true; /* labels only exist at aligned, in-ROM addresses */
+    for (unsigned a = start + 1; a < pc; ++a) leader[a] = false;
+  }
+}
+
 /* Print a code/data/unknown region map to stderr. */
 static void print_report(size_t size)
 {
@@ -299,6 +319,7 @@ int main(int argc, const char *argv[])
   fclose(fp);
   analyze(size);
   descend(size);
+  glue_unreachable(size);
   if (report) print_report(size);
   for (unsigned pc = ENTRYPOINT; pc + 1 < ENTRYPOINT + size; pc += 2) {
     uint16_t op = (uint16_t)((memory[pc] << 8) | memory[pc + 1]);

@@ -134,6 +134,28 @@ def test_disassembler_odd_size_round_trip():
     assert rebuilt == original
 
 
+def test_unreachable_blocks_are_glued():
+    # JP over a dead region containing a RET and a JP: naive leader
+    # analysis would split the dead region into three blocks; after
+    # gluing it must be a single block.
+    original = bytes.fromhex("1206 00ee 1202 6001")
+    with tempfile.NamedTemporaryFile("wb") as rom:
+        rom.write(original)
+        rom.flush()
+        source = subprocess.check_output([DISAS, "--asm", rom.name], text=True)
+    assert "block200:" in source
+    assert "block202:" in source  # one label for the whole dead region
+    assert "block206:" in source
+    assert "JP block206" in source
+    assert "block204:" not in source
+    assert "; unreachable" in source
+    with tempfile.NamedTemporaryFile("w", suffix=".asm") as text:
+        text.write(source)
+        text.flush()
+        rebuilt = subprocess.check_output([ASM, text.name])
+    assert rebuilt == original
+
+
 def test_disassembler_indirect_jump_warning():
     original = bytes.fromhex("b220 00ee")
     with tempfile.NamedTemporaryFile("wb") as rom:
@@ -156,6 +178,7 @@ if __name__ == "__main__":
     test_disassembler_asm_round_trip()
     test_disassembler_basic_blocks()
     test_disassembler_odd_size_round_trip()
+    test_unreachable_blocks_are_glued()
     test_disassembler_indirect_jump_warning()
     test_failures()
     print("chip8-asm tests: OK")
