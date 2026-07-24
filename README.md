@@ -12,6 +12,7 @@ the loaded ROM a different way.
 | `chip8-llvm`      | Trace JIT built on LLVM ORC.         |
 | `chip8-libgccjit` | Trace JIT built on libgccjit.        |
 | `chip8-disas`     | Static disassembler.                 |
+| `chip8-asm`       | Two-pass CHIP-8 assembler.           |
 
 Both JITs compile one native function per entry PC, cache it, and extend traces
 across unconditional jumps and the taken side of skips; awkward opcodes (control
@@ -40,13 +41,14 @@ must point `CPPFLAGS` and `LDFLAGS` at that directory. The one-liner to properly
 gccjit_dir=$(dirname $(find /usr/lib/gcc -name libgccjit.so 2>/dev/null | head -1)); CPPFLAGS="-I$gccjit_dir/include" LDFLAGS="-L$gccjit_dir" make -C src
 ```
 
-If you only need the interpreter, LLVM, or disassembler targets, the libgccjit
-path is not required and a plain `make chip8-interp` (etc.) will work without it.
+If you only need the interpreter, LLVM, disassembler, or assembler target, the
+libgccjit path is not required and a plain `make chip8-interp` (etc.) will work without it.
 
 ```sh
 cd src
-make                 # builds all four targets (needs the libgccjit flags above)
+make                 # builds all five targets (needs the libgccjit flags above)
 make chip8-interp    # or build a single target
+make chip8-asm
 ```
 
 Override the LLVM config binary if needed, e.g. `make LLVM_CONFIG=llvm-config`.
@@ -64,12 +66,62 @@ the hex keys `0`-`9` and `a`-`f`; press `q` or `Escape` to quit. On exit the
 register file, program counter, address register, and timers are dumped to
 stderr.
 
+## Assembling ROMs
+
+`chip8-asm` reads source from a file and writes the raw ROM payload to standard
+output. ROM addresses start at `0x200`; the output contains bytes from that
+address onward.
+
+```sh
+./chip8-asm program.asm > program.ch8
+./chip8-interp program.ch8
+```
+
+The assembler accepts case-insensitive conventional CHIP-8 mnemonics:
+`CLS`, `RET`, `JP`, `CALL`, `SE`, `SNE`, `LD`, `ADD`, `OR`, `AND`, `XOR`,
+`SUB`, `SHR`, `SUBN`, `SHL`, `RND`, `DRW`, `SKP`, and `SKNP`. `SHR` and `SHL`
+may include an optional second register operand to preserve its encoded `y`
+nibble when round-tripping a ROM. Registers are
+written `V0` through `VF`; numeric literals use decimal or C-style prefixes
+such as `0xFF`. `LD` supports the standard special operands `I`, `DT`, `ST`,
+`K`, `F`, `B`, and `[I]` (for example, `LD B, V3` and `LD V3, [I]`).
+
+Labels end with `:` and may be used before or after their definition. `;` and
+`#` start comments. The data directives are `.byte`, `.word` (big-endian), and
+`.org`; `.org` can move forward within `0x200` through `0xFFF` and fills the
+intervening output with zeroes. Example:
+
+```asm
+; clear, then spin forever
+start:
+    CLS
+    LD V0, 0x2A
+loop:
+    ADD V0, 1
+    JP loop
+
+sprite: .byte 0xF0, 0x90, 0xF0, 0x90, 0x90
+```
+
+The disassembler retains its human-readable prose output by default. Pass
+`--asm` (or `-a`) to emit assembler source accepted by `chip8-asm`; addresses
+are omitted, and unrecognized opcodes are preserved as `.word` directives.
+
+```sh
+./chip8-disas --asm program.ch8 > program.asm
+./chip8-asm program.asm > rebuilt.ch8
+```
+
 ## Testing
 
 Two helper scripts in `scripts/` drive the engines under a pty and capture
 results, since ROMs do not terminate on their own and the display is
 ncurses. Both send `q` to quit and SIGKILL the child as a safety net so the
-tool always returns.
+tool always returns. The assembler's byte-level regression suite can be run with:
+
+```sh
+make -C src test
+```
 
 - **`run_dump.py <engine> <rom>`** captures the stderr state dump
   (registers, PC, `I`, timers) while discarding the ncurses screen. Use it
