@@ -151,19 +151,75 @@ def instruction_map(statements: list[Statement]) -> dict[int, Statement]:
     return {s.pc: s for s in statements if s.op and not s.op.startswith(".")}
 
 
+def dynamic_base(base: int) -> int:
+    return -(base + 2)
+
+
+def is_dynamic_base(value: Optional[int]) -> bool:
+    return value is not None and value <= -2
+
+
+def decode_dynamic_base(value: int) -> int:
+    return -value - 2
+
+
 def add_access(a: Analysis, pc: int, kind: str, start: Optional[int], length: Optional[int], reason: str) -> None:
     # Fx29 points into the interpreter font below 0x200.  It is dynamic, but
     # cannot alias/refer to relocatable ROM data.
     if start == EXTERNAL_I:
+        return
+    if is_dynamic_base(start):
+        a.accesses.append(Access(pc, f"dynamic-{kind}", decode_dynamic_base(start), length, reason))
         return
     a.accesses.append(Access(pc, kind, start, length, reason))
     if start is None:
         a.hazards.add(f"0x{pc:03X}: dynamic I for {reason}")
 
 
+def call_i_summaries(insns: dict[int, Statement], labels: dict[str, int]) -> dict[int, Optional[int]]:
+    """Very conservative summaries for straight-line leaf routines.
+
+    ``None`` means the routine's I effect is unknown; a missing ``LD I`` means
+    it preserves I.  Branching routines deliberately receive no summary.
+    """
+    summaries: dict[int, Optional[int]] = {}
+    for call in insns.values():
+        if call.op != "CALL":
+            continue
+        start = target(call, labels)
+        if start is None or start in summaries:
+            continue
+        pc, last_i, safe = start, "preserve", True
+        while pc in insns:
+            stmt = insns[pc]
+            if stmt.op == "LD" and len(stmt.args) == 2 and stmt.args[0] == "I":
+                value = resolve(stmt.args[1], labels)
+                if value is None:
+                    safe = False
+                    break
+                last_i = value
+            elif stmt.op == "ADD" and len(stmt.args) == 2 and stmt.args[0] == "I":
+                if not isinstance(last_i, int) or last_i == EXTERNAL_I:
+                    safe = False
+                    break
+                last_i = last_i if is_dynamic_base(last_i) else dynamic_base(last_i)
+            elif stmt.op in {"JP", "CALL"}:
+                safe = False
+                break
+            if stmt.op == "RET":
+                break
+            pc += 2
+        if safe and pc in insns and insns[pc].op == "RET":
+            summaries[start] = last_i  # type: ignore[assignment]
+        else:
+            summaries[start] = None
+    return summaries
+
+
 def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
     result = Analysis(labels, statements)
     insns = instruction_map(statements)
+    summaries = call_i_summaries(insns, labels)
     # I and Vx constants form a deliberately tiny abstract domain.  It is enough
     # to identify the common LD I; DRW / Fx55 patterns without claiming proof.
     State = tuple[Optional[int], tuple[Optional[int], ...]]
@@ -206,7 +262,14 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
         elif op == "ADD" and len(args) == 2:
             if args[0] == "I":
                 value = regs[int(args[1][1], 16)] if args[1].startswith("V") else None
-                i_value = None if i_value is None or value is None else i_value + value
+                if i_value is None:
+                    i_value = None
+                elif is_dynamic_base(i_value):
+                    i_value = i_value
+                elif value is None:
+                    i_value = dynamic_base(i_value)
+                else:
+                    i_value = i_value + value
             elif args[0].startswith("V"):
                 x = int(args[0][1], 16)
                 value = resolve(args[1], labels) if not args[1].startswith("V") else regs[int(args[1][1], 16)]
@@ -225,7 +288,13 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
                 # The target itself receives the caller state.
                 propagated = next_state
                 if op == "CALL" and dest == stmt.pc + 2:
-                    propagated = (None, (None,) * 16)
+                    effect = summaries.get(target(stmt, labels))
+                    if effect == "preserve":
+                        propagated = next_state
+                    elif isinstance(effect, int):
+                        propagated = (effect, (None,) * 16)
+                    else:
+                        propagated = (None, (None,) * 16)
                 previous = incoming.get(dest)
                 merged = propagated if previous is None else join(previous, propagated)
                 if previous != merged:
@@ -282,10 +351,26 @@ def symbolize_in_rom_addresses(statements: list[Statement], labels: dict[str, in
     return output, new_labels
 
 
+def dynamic_base_boundaries(statements: list[Statement], labels: dict[str, int]) -> set[int]:
+    """Return data-relative dynamic-I bases whose following layout is pinned.
+
+    Deleting bytes before a symbolic base moves both the base and everything
+    after it equally.  Deleting bytes at/after that base could change a
+    data-relative dynamic offset, so those bytes are kept in place.
+    """
+    analysis = analyze(statements, labels)
+    return {access.start for access in analysis.accesses if access.kind.startswith("dynamic-") and access.start is not None}
+
+
 def relocation_hazards(statements: list[Statement], labels: dict[str, int]) -> list[str]:
     """Conditions that make deleting bytes unsafe without a whole-ROM relocator."""
     analysis = analyze(statements, labels)
-    problems = [h for h in analysis.hazards if "dynamic I" in h or "ROM payload" in h or "computed JP" in h]
+    # Static writes to labelled payload data are relocatable too; only writes
+    # that overlap executable bytes remain self-modifying-code blockers.  A
+    # merged CFG state can retain an unknown path beside a proven symbolic-base
+    # path; the latter pins that instruction's following layout.
+    proven_dynamic_pcs = {access.pc for access in analysis.accesses if access.kind.startswith("dynamic-")}
+    problems = [h for h in analysis.hazards if ("dynamic I" in h and int(h[2:5], 16) not in proven_dynamic_pcs) or "self-modifying" in h or "computed JP" in h]
     payload_end = max((s.pc + s.size for s in statements), default=ENTRY)
     for s in statements:
         if s.op == ".ORG":
@@ -322,6 +407,8 @@ def optimize_peepholes(statements: list[Statement], labels: dict[str, int]) -> t
     if problems:
         raise ValueError("cannot compact safely: " + "; ".join(problems))
     protected = protected_pcs(statements, labels)
+    for base in dynamic_base_boundaries(statements, labels):
+        protected.update(s.pc for s in statements if s.pc >= base)
     result: list[Statement] = []
     changes: list[str] = []
     i = 0
