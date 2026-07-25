@@ -17,6 +17,7 @@ from typing import Optional
 
 ENTRY = 0x200
 LIMIT = 0x1000
+EXTERNAL_I = -1  # CHIP-8 font memory; never part of an assembled ROM payload.
 
 
 @dataclass
@@ -151,6 +152,10 @@ def instruction_map(statements: list[Statement]) -> dict[int, Statement]:
 
 
 def add_access(a: Analysis, pc: int, kind: str, start: Optional[int], length: Optional[int], reason: str) -> None:
+    # Fx29 points into the interpreter font below 0x200.  It is dynamic, but
+    # cannot alias/refer to relocatable ROM data.
+    if start == EXTERNAL_I:
+        return
     a.accesses.append(Access(pc, kind, start, length, reason))
     if start is None:
         a.hazards.add(f"0x{pc:03X}: dynamic I for {reason}")
@@ -191,7 +196,7 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
                 x = int(args[0][1], 16)
                 regs[x] = resolve(args[1], labels) if not args[1].startswith("V") else regs[int(args[1][1], 16)]
             elif args[0] == "F":
-                i_value = None
+                i_value = EXTERNAL_I
             elif args[0] == "B" and args[1].startswith("V"):
                 add_access(result, pc, "write", i_value, 3, "BCD store")
             elif args[0] == "[I]" and args[1].startswith("V"):
@@ -239,6 +244,44 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
     return result
 
 
+def symbolize_in_rom_addresses(statements: list[Statement], labels: dict[str, int]) -> tuple[list[Statement], dict[str, int]]:
+    """Replace direct numeric in-ROM references with generated symbolic labels.
+
+    A label is inserted at the referenced statement boundary, so a compacting
+    pass can move a sprite/data table along with every direct I reference.
+    """
+    payload_end = max((s.pc + s.size for s in statements), default=ENTRY)
+    by_pc = {s.pc: s for s in statements}
+    generated: dict[int, str] = {}
+    for s in statements:
+        if not (s.op in {"JP", "CALL"} or (s.op == "LD" and len(s.args) == 2 and s.args[0] == "I")):
+            continue
+        value = target(s, labels)
+        if value is None or not ENTRY <= value < payload_end or value not in by_pc:
+            continue
+        if parse_number(s.args[-1]) is not None:
+            generated.setdefault(value, f"ADDR{value:03X}")
+    output: list[Statement] = []
+    new_labels = dict(labels)
+    for s in statements:
+        name = generated.get(s.pc)
+        if name:
+            # A source label already supplies the symbolic relocation anchor.
+            existing = next((label for label, address in labels.items() if address == s.pc), None)
+            name = existing or name
+            new_labels[name] = s.pc
+            if not existing:
+                output.append(Statement(s.line, name, None, [], s.pc, 0))
+        copied = Statement(s.line, s.label, s.op, list(s.args), s.pc, s.size)
+        # The reference target, not the instruction PC, selects the generated name.
+        if copied.op and copied.args and parse_number(copied.args[-1]) is not None:
+            value = target(s, labels)
+            if value in generated:
+                copied.args[-1] = next((label for label, address in new_labels.items() if address == value), generated[value])
+        output.append(copied)
+    return output, new_labels
+
+
 def relocation_hazards(statements: list[Statement], labels: dict[str, int]) -> list[str]:
     """Conditions that make deleting bytes unsafe without a whole-ROM relocator."""
     analysis = analyze(statements, labels)
@@ -274,6 +317,7 @@ def is_register(word: str) -> bool:
 
 def optimize_peepholes(statements: list[Statement], labels: dict[str, int]) -> tuple[list[Statement], list[str]]:
     """Apply small, proven byte-removing rewrites to relocatable source."""
+    statements, labels = symbolize_in_rom_addresses(statements, labels)
     problems = relocation_hazards(statements, labels)
     if problems:
         raise ValueError("cannot compact safely: " + "; ".join(problems))

@@ -147,9 +147,10 @@ make -C src test
   computed `JP V0`, dynamic `I`, and writes into the ROM payload are retained
   for later optimizer passes to gate on.  `optimize` currently implements
   byte-removing peepholes (no-op removal, dead pure loads, and `LD`/`ADD`
-  constant folding).  It refuses fixed-layout source (`.ORG`), numeric in-ROM
-  addresses, and those hazards; the current pass deliberately relies on labels
-  to relocate every affected address safely.
+  constant folding).  Direct numeric in-ROM `JP`, `CALL`, and `LD I` operands
+  are converted to generated labels before compaction, allowing their targets
+  to relocate safely.  It still refuses fixed-layout source (`.ORG`) and
+  hazards whose target cannot yet be relocated safely.
 
 - **`screen_dump.py <engine> <rom> [--keys KEYS] [--ticks N | --hold SECS]`**
   is the complement: it captures stdout, replays it through a small vt100

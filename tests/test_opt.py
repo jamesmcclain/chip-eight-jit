@@ -64,6 +64,24 @@ done: RET
         assert run(ASM, optimized) == bytes.fromhex("6103 6305 1206 00ee")
 
 
+def test_peepholes_relocate_numeric_data_pointer_to_generated_label():
+    source = """\\
+LD I, 0x208
+LD V1, 1
+LD V1, 2
+RET
+.byte 0
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        directory = pathlib.Path(directory)
+        original = directory / "input.asm"
+        optimized = directory / "optimized.asm"
+        original.write_text(source)
+        subprocess.check_call([OPT, "optimize", original, "-o", optimized])
+        assert "ADDR208:" in optimized.read_text()
+        assert run(ASM, optimized) == bytes.fromhex("a206 6102 00ee 00")
+
+
 def test_peepholes_do_not_remove_memory_stores():
     source = """\\
 LD I, 0x700
