@@ -28,6 +28,35 @@ def test_canonicalize_round_trip_real_roms():
         assert rebuilt == original, rom_name
 
 
+def test_peephole_loop_accepts_pong_and_tetris():
+    for rom_name in ("PONG", "TETRIS"):
+        original = (ROOT / "roms" / rom_name).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            directory = pathlib.Path(directory)
+            source = directory / "input.asm"
+            optimized = directory / "optimized.asm"
+            source.write_bytes(run(DISAS, "--asm", ROOT / "roms" / rom_name))
+            subprocess.check_call([OPT, "optimize", source, "-o", optimized])
+            assert run(ASM, optimized) == original, rom_name
+
+
+def test_analyzer_tracks_i_through_call_and_return():
+    source = """\\
+CALL sprite
+DRW V0, V1, 1
+RET
+sprite: LD I, data
+RET
+data: .byte 0
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".asm") as f:
+        f.write(source)
+        f.flush()
+        data = json.loads(run(OPT, "analyze", "--json", f.name, text=True))
+    assert {"pc": "0x202", "kind": "read", "start": "0x20A", "length": 1, "reason": "sprite read"} in data["accesses"]
+    assert not any("dynamic I" in hazard for hazard in data["hazards"])
+
+
 def test_analyzer_reports_static_rom_write_and_cfg():
     source = """\
 start: LD I, scratch

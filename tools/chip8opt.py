@@ -176,58 +176,21 @@ def add_access(a: Analysis, pc: int, kind: str, start: Optional[int], length: Op
         a.hazards.add(f"0x{pc:03X}: dynamic I for {reason}")
 
 
-def call_i_summaries(insns: dict[int, Statement], labels: dict[str, int]) -> dict[int, Optional[int]]:
-    """Very conservative summaries for straight-line leaf routines.
-
-    ``None`` means the routine's I effect is unknown; a missing ``LD I`` means
-    it preserves I.  Branching routines deliberately receive no summary.
-    """
-    summaries: dict[int, Optional[int]] = {}
-    for call in insns.values():
-        if call.op != "CALL":
-            continue
-        start = target(call, labels)
-        if start is None or start in summaries:
-            continue
-        pc, last_i, safe = start, "preserve", True
-        while pc in insns:
-            stmt = insns[pc]
-            if stmt.op == "LD" and len(stmt.args) == 2 and stmt.args[0] == "I":
-                value = resolve(stmt.args[1], labels)
-                if value is None:
-                    safe = False
-                    break
-                last_i = value
-            elif stmt.op == "ADD" and len(stmt.args) == 2 and stmt.args[0] == "I":
-                if not isinstance(last_i, int) or last_i == EXTERNAL_I:
-                    safe = False
-                    break
-                last_i = last_i if is_dynamic_base(last_i) else dynamic_base(last_i)
-            elif stmt.op in {"JP", "CALL"}:
-                safe = False
-                break
-            if stmt.op == "RET":
-                break
-            pc += 2
-        if safe and pc in insns and insns[pc].op == "RET":
-            summaries[start] = last_i  # type: ignore[assignment]
-        else:
-            summaries[start] = None
-    return summaries
-
-
 def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
     result = Analysis(labels, statements)
     insns = instruction_map(statements)
-    summaries = call_i_summaries(insns, labels)
     # I and Vx constants form a deliberately tiny abstract domain.  It is enough
     # to identify the common LD I; DRW / Fx55 patterns without claiming proof.
     State = tuple[Optional[int], tuple[Optional[int], ...]]
     initial: State = (None, (None,) * 16)
     # Join incoming states at each PC.  This keeps loops finite: a disagreeing
     # constant becomes unknown, rather than creating one state per iteration.
-    incoming: dict[int, State] = {ENTRY: initial}
-    work: deque[int] = deque([ENTRY])
+    # A context includes the CHIP-8 return stack.  Treating CALL as an edge to
+    # both target and fall-through loses callee effects and is exactly what made
+    # TETRIS's table pointer look unknown.  CHIP-8 has a bounded 16-level stack.
+    Context = tuple[int, tuple[int, ...]]
+    incoming: dict[Context, State] = {(ENTRY, ()): initial}
+    work: deque[Context] = deque([(ENTRY, ())])
 
     def join(old: State, new: State) -> State:
         old_i, old_regs = old
@@ -236,10 +199,10 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
                 tuple(a if a == b else None for a, b in zip(old_regs, new_regs)))
 
     while work:
-        pc = work.popleft()
+        pc, returns = work.popleft()
         if pc not in insns:
             continue
-        state = incoming[pc]
+        state = incoming[(pc, returns)]
         result.reachable.add(pc)
         stmt = insns[pc]
         i_value, regs = state
@@ -280,26 +243,30 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
         if op in {"RND", "OR", "AND", "XOR", "SUB", "SUBN", "SHR", "SHL"} and args and args[0].startswith("V"):
             regs[int(args[0][1], 16)] = None
         next_state: State = (i_value, tuple(regs))
-        for dest in successors(stmt, labels, result.hazards):
+        if op == "CALL":
+            dest = target(stmt, labels)
+            if dest is None:
+                result.hazards.add(f"0x{pc:03X}: unresolved CALL target")
+                transitions: list[tuple[int, tuple[int, ...]]] = []
+            elif len(returns) >= 16:
+                result.hazards.add(f"0x{pc:03X}: call stack exceeds 16 levels")
+                transitions = []
+            else:
+                transitions = [(dest, returns + (pc + 2,))]
+        elif op == "RET":
+            transitions = [(returns[-1], returns[:-1])] if returns else []
+        else:
+            transitions = [(dest, returns) for dest in successors(stmt, labels, result.hazards)]
+        for dest, next_returns in transitions:
             if ENTRY <= dest < LIMIT:
                 result.edges.add((pc, dest))
                 result.leaders.add(dest)
-                # A call's return continuation has the callee's unknown effects.
-                # The target itself receives the caller state.
-                propagated = next_state
-                if op == "CALL" and dest == stmt.pc + 2:
-                    effect = summaries.get(target(stmt, labels))
-                    if effect == "preserve":
-                        propagated = next_state
-                    elif isinstance(effect, int):
-                        propagated = (effect, (None,) * 16)
-                    else:
-                        propagated = (None, (None,) * 16)
-                previous = incoming.get(dest)
-                merged = propagated if previous is None else join(previous, propagated)
+                key = (dest, next_returns)
+                previous = incoming.get(key)
+                merged = next_state if previous is None else join(previous, next_state)
                 if previous != merged:
-                    incoming[dest] = merged
-                    work.append(dest)
+                    incoming[key] = merged
+                    work.append(key)
     # Writes into the assembled payload make its apparent data mutable; writes
     # overlapping reachable instructions are the stricter self-modifying case.
     payload_end = max((s.pc + s.size for s in statements), default=ENTRY)
