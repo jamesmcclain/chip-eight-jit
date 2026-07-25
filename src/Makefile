@@ -33,6 +33,7 @@ libgccjit_jit.o: libgccjit_jit.c
 
 test: chip8-asm chip8-disas
 	python3 ../tests/test_asm.py
+	python3 ../tests/test_opt.py
 
 clean:
 	rm -f *.o *.d

@@ -128,6 +128,23 @@ make -C src test
   for deterministic cross-engine comparisons of final machine state, e.g.
   after a crafted micro-ROM.
 
+- **`tools/chip8opt.py`** is the deliberately conservative front-end for the
+  planned optimizer.  It currently analyzes assembler-compatible source and
+  canonicalizes it without changing its assembled bytes:
+
+  ```sh
+  src/chip8-disas --asm roms/PONG > pong.asm
+  python3 tools/chip8opt.py analyze --json pong.asm
+  python3 tools/chip8opt.py canonicalize pong.asm -o pong.canonical.asm
+  src/chip8-asm pong.canonical.asm > pong.ch8
+  ```
+
+  Analysis reports reachable instructions, CFG leaders/edges, declared data,
+  statically known `I`-relative reads/writes, and hazards.  A hazard is a
+  refusal to prove safety—not evidence that the ROM is broken.  In particular,
+  computed `JP V0`, dynamic `I`, and writes into the ROM payload are retained
+  for later optimizer passes to gate on.
+
 - **`screen_dump.py <engine> <rom> [--keys KEYS] [--ticks N | --hold SECS]`**
   is the complement: it captures stdout, replays it through a small vt100
   renderer so the CHIP-8 font glyphs land at their real screen positions,
