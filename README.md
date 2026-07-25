@@ -137,13 +137,19 @@ make -C src test
   python3 tools/chip8opt.py analyze --json pong.asm
   python3 tools/chip8opt.py canonicalize pong.asm -o pong.canonical.asm
   src/chip8-asm pong.canonical.asm > pong.ch8
+  # `optimize` deletes bytes only from safely relocatable, symbolic source.
+  python3 tools/chip8opt.py optimize source.asm -o compact.asm
   ```
 
   Analysis reports reachable instructions, CFG leaders/edges, declared data,
   statically known `I`-relative reads/writes, and hazards.  A hazard is a
   refusal to prove safety—not evidence that the ROM is broken.  In particular,
   computed `JP V0`, dynamic `I`, and writes into the ROM payload are retained
-  for later optimizer passes to gate on.
+  for later optimizer passes to gate on.  `optimize` currently implements
+  byte-removing peepholes (no-op removal, dead pure loads, and `LD`/`ADD`
+  constant folding).  It refuses fixed-layout source (`.ORG`), numeric in-ROM
+  addresses, and those hazards; the current pass deliberately relies on labels
+  to relocate every affected address safely.
 
 - **`screen_dump.py <engine> <rom> [--keys KEYS] [--ticks N | --hold SECS]`**
   is the complement: it captures stdout, replays it through a small vt100

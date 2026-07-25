@@ -239,6 +239,84 @@ def analyze(statements: list[Statement], labels: dict[str, int]) -> Analysis:
     return result
 
 
+def relocation_hazards(statements: list[Statement], labels: dict[str, int]) -> list[str]:
+    """Conditions that make deleting bytes unsafe without a whole-ROM relocator."""
+    analysis = analyze(statements, labels)
+    problems = [h for h in analysis.hazards if "dynamic I" in h or "ROM payload" in h or "computed JP" in h]
+    payload_end = max((s.pc + s.size for s in statements), default=ENTRY)
+    for s in statements:
+        if s.op == ".ORG":
+            problems.append(f"0x{s.pc:03X}: .ORG fixes layout")
+        if s.op in {"JP", "CALL"} or (s.op == "LD" and len(s.args) == 2 and s.args[0] == "I"):
+            value = target(s, labels)
+            # A numeric in-ROM address will not track the compacted layout.
+            if s.args and parse_number(s.args[-1]) is not None and ENTRY <= (value or 0) < payload_end:
+                problems.append(f"0x{s.pc:03X}: numeric in-ROM address")
+    return sorted(set(problems))
+
+
+def protected_pcs(statements: list[Statement], labels: dict[str, int]) -> set[int]:
+    """PCs which must remain instruction boundaries for skip/control-flow entry."""
+    protected = {ENTRY, *labels.values()}
+    for s in statements:
+        if s.op in {"JP", "CALL"} and not (s.op == "JP" and len(s.args) == 2):
+            value = target(s, labels)
+            if value is not None:
+                protected.add(value)
+        if is_skip(s):
+            protected.update((s.pc + 2, s.pc + 4))
+    return protected
+
+
+def is_register(word: str) -> bool:
+    return len(word) == 2 and word[0] == "V" and word[1] in "0123456789ABCDEF"
+
+
+def optimize_peepholes(statements: list[Statement], labels: dict[str, int]) -> tuple[list[Statement], list[str]]:
+    """Apply small, proven byte-removing rewrites to relocatable source."""
+    problems = relocation_hazards(statements, labels)
+    if problems:
+        raise ValueError("cannot compact safely: " + "; ".join(problems))
+    protected = protected_pcs(statements, labels)
+    result: list[Statement] = []
+    changes: list[str] = []
+    i = 0
+    while i < len(statements):
+        s = statements[i]
+        next_s = statements[i + 1] if i + 1 < len(statements) else None
+        # Fold LD Vx, kk; ADD Vx, kk.  A branch/skip into the ADD would see a
+        # different input value, so only remove an unprotected second word.
+        if (next_s and s.op == "LD" and next_s.op == "ADD" and len(s.args) == len(next_s.args) == 2
+                and is_register(s.args[0]) and s.args[0] == next_s.args[0]
+                and parse_number(s.args[1]) is not None and parse_number(next_s.args[1]) is not None
+                and next_s.label is None and next_s.pc not in protected):
+            total = (parse_number(s.args[1]) + parse_number(next_s.args[1])) & 0xFF
+            result.append(Statement(s.line, s.label, "LD", [s.args[0], f"0x{total:02X}"], s.pc, 2))
+            changes.append(f"0x{s.pc:03X}: folded LD/ADD for {s.args[0]}")
+            i += 2
+            continue
+        # These instructions have no side effects. Labels are retained as
+        # boundaries; a later relocation pass can handle label coalescing.
+        noop = (s.op == "LD" and len(s.args) == 2 and s.args[0] == s.args[1]) or (
+            s.op == "ADD" and len(s.args) == 2 and is_register(s.args[0]) and parse_number(s.args[1]) == 0)
+        if noop and s.label is None and s.pc not in protected:
+            changes.append(f"0x{s.pc:03X}: removed no-op {s.op}")
+            i += 1
+            continue
+        # An immediately overwritten pure load is dead.  Do not erase a label
+        # or a skip/control-flow entry point.
+        if (next_s and s.op == "LD" and next_s.op == "LD" and len(s.args) == len(next_s.args) == 2
+                and s.args[0] == next_s.args[0] and (s.args[0] == "I" or is_register(s.args[0]))
+                and s.args[1] != "K"
+                and s.label is None and s.pc not in protected):
+            changes.append(f"0x{s.pc:03X}: removed overwritten LD {s.args[0]}")
+            i += 1
+            continue
+        result.append(s)
+        i += 1
+    return result, changes
+
+
 def canonicalize(statements: list[Statement]) -> str:
     lines: list[str] = []
     for s in statements:
@@ -269,7 +347,7 @@ def report(analysis: Analysis) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("analyze", "canonicalize"):
+    for name in ("analyze", "canonicalize", "optimize"):
         p = sub.add_parser(name)
         p.add_argument("source", type=Path, help="assembler-compatible source")
         p.add_argument("-o", "--output", type=Path)
@@ -281,6 +359,15 @@ def main() -> int:
         parser.error(str(exc))
     if args.command == "canonicalize":
         output = canonicalize(statements)
+    elif args.command == "optimize":
+        try:
+            optimized, changes = optimize_peepholes(statements, labels)
+        except ValueError as exc:
+            parser.error(str(exc))
+        output = canonicalize(optimized)
+        print(f"peephole optimization: {len(changes)} change(s)", file=sys.stderr)
+        for change in changes:
+            print(f"  {change}", file=sys.stderr)
     else:
         payload = report(analyze(statements, labels))
         if args.json:

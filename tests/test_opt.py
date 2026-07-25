@@ -45,6 +45,56 @@ scratch: .byte 0, 0, 0
     assert ["0x204", "0x200"] in data["edges"]
 
 
+def test_peepholes_compact_relocatable_source():
+    source = """\\
+start: LD V1, 1
+ADD V1, 2
+LD V2, V2
+LD V3, 4
+LD V3, 5
+JP done
+done: RET
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        directory = pathlib.Path(directory)
+        original = directory / "input.asm"
+        optimized = directory / "optimized.asm"
+        original.write_text(source)
+        subprocess.check_call([OPT, "optimize", original, "-o", optimized])
+        assert run(ASM, optimized) == bytes.fromhex("6103 6305 1206 00ee")
+
+
+def test_peepholes_do_not_remove_memory_stores():
+    source = """\\
+LD I, 0x700
+LD [I], V0
+LD [I], V1
+RET
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        directory = pathlib.Path(directory)
+        original = directory / "input.asm"
+        optimized = directory / "optimized.asm"
+        original.write_text(source)
+        subprocess.check_call([OPT, "optimize", original, "-o", optimized])
+        assert run(ASM, optimized) == bytes.fromhex("a700 f055 f155 00ee")
+
+
+def test_peepholes_reject_fixed_layout_or_dynamic_rom_access():
+    source = """\\
+LD I, 0x206
+DRW V0, V1, 1
+LD V2, V2
+.byte 0
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".asm") as f:
+        f.write(source)
+        f.flush()
+        result = subprocess.run([OPT, "optimize", f.name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    assert result.returncode != 0
+    assert "cannot compact safely" in result.stderr
+
+
 def test_analyzer_marks_dynamic_control_flow():
     with tempfile.NamedTemporaryFile("w", suffix=".asm") as f:
         f.write("JP V0, 0x220\n")
