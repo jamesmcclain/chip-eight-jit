@@ -239,6 +239,14 @@ void check_interrupt()
     {
       interrupt_pending = 0;
       interrupt();
+      // The dispatcher observes the quit key between traces, which was every
+      // loop iteration back when a back-edge returned. Traces now close their
+      // own loops, so a spin loop need never come back -- the quit key has to
+      // be observed here too, or it would be ignored until the loop exits.
+      if (all_keys_down() & (1u << 31))
+        {
+          program_over = 1;
+        }
     }
 #endif
 }
@@ -587,6 +595,30 @@ code codegen(void)
       blk = cont_blk; \
     } while (0)
 
+  // Close a back edge: branch to `dst`, a block already emitted in this trace,
+  // instead of returning to the dispatcher. Terminates blk.
+  //
+  // The dispatcher is where program_over (end of run, error, quit key) was
+  // observed, and a returning back-edge visited it once per loop iteration. A
+  // loop that stays inside the trace has to observe it itself, or a CHIP-8
+  // spin loop -- `JP self`, which every ROM ends with -- would never exit.
+  // The load is volatile so that it cannot be hoisted out of the loop the
+  // branch has just created; the safepoint above it is what makes the flag
+  // change in the first place.
+  #define CLOSE_BACKEDGE(dst) \
+    do { \
+      char xname[24]; \
+      snprintf(xname, sizeof(xname), "be_exit_%d", block_id); \
+      ++block_id; \
+      gcc_jit_block *exit_blk = gcc_jit_function_new_block(function, xname); \
+      gcc_jit_rvalue *over = gcc_jit_context_new_comparison(ctx, NULL, \
+        GCC_JIT_COMPARISON_NE, \
+        gcc_jit_lvalue_as_rvalue(mem(ctx, t_vintp, &program_over)), \
+        gcc_jit_context_new_rvalue_from_int(ctx, t_int, 0)); \
+      gcc_jit_block_end_with_conditional(blk, NULL, over, exit_blk, (dst)); \
+      gcc_jit_block_end_with_void_return(exit_blk, NULL); \
+    } while (0)
+
   // Bench builds account for architectural CHIP-8 instructions so that the
   // virtual clock matches the interpreter's. The count is of instructions the
   // trace stands in for, not of emitted operations: a peephole that folds two
@@ -603,10 +635,41 @@ code codegen(void)
   int local_id = 0;
   int block_id = 0;
 
+  // The block each CHIP-8 address was emitted into, for this trace only. A
+  // jump whose target is already in here is a back edge into code we have
+  // compiled, and can be closed as a branch; anything else still ends the
+  // trace. Straight-line blocks cost nothing -- both backends fold them away.
+  static gcc_jit_block *pc_block[MEMORY_SIZE];
+  memset(pc_block, 0, sizeof(pc_block));
+
   for (uint16_t pc = program_counter, op_count = 0; ; pc += 2, ++op_count)
     {
       op = OP_AT(pc);
       mark_code(pc, 2);
+
+      if (pc_block[pc] != NULL)
+        {
+          // Fell through onto an address this trace already compiled. Close
+          // the loop rather than emit it twice; the safepoint keeps input and
+          // timers serviced once per iteration, exactly as the jump case does.
+          SAFEPOINT();
+          gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
+            gcc_jit_context_new_rvalue_from_int(ctx, t_u16, pc));
+          CLOSE_BACKEDGE(pc_block[pc]);
+          goto trace_terminated;
+        }
+
+      {
+        // One block per instruction, so that any address in the trace is a
+        // branch target.
+        char pname[24];
+        snprintf(pname, sizeof(pname), "pc_%04x_%d", pc, block_id);
+        ++block_id;
+        gcc_jit_block *pc_blk = gcc_jit_function_new_block(function, pname);
+        gcc_jit_block_end_with_jump(blk, NULL, pc_blk);
+        blk = pc_blk;
+        pc_block[pc] = pc_blk;
+      }
 
       // Periodic safepoint: bound the number of straight-line (or taken-skip)
       // instructions that can execute between input/timer checks.
@@ -637,12 +700,22 @@ code codegen(void)
             SAFEPOINT();
             gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
               gcc_jit_context_new_rvalue_from_int(ctx, t_u16, immediate));
-            if ((pc != immediate) && (op_count < (1<<8)))
+            if (pc_block[immediate] != NULL)
+              {
+                // Back edge into this trace -- including the self-loop
+                // `JP self`. Branch to the block instead of returning: the
+                // whole loop now runs as one native loop, where it used to
+                // cost a dispatcher round trip (and, for a self-loop, a
+                // trace-cache lookup) on every single iteration.
+                CLOSE_BACKEDGE(pc_block[immediate]);
+                goto trace_terminated;
+              }
+            if (op_count < (1<<8))
               {
                 pc = immediate - 2; // continue the trace at the jump target
                 continue;
               }
-            goto end_of_trace; // self-loop or trace too long: bounce to dispatch
+            goto end_of_trace; // trace too long: bounce to dispatch
           }
         case 0x2:
           { // call
@@ -707,7 +780,17 @@ code codegen(void)
                 SAFEPOINT();
                 gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
                   gcc_jit_context_new_rvalue_from_int(ctx, t_u16, fused_target));
-                gcc_jit_block_end_with_void_return(blk, NULL);
+                if (pc_block[fused_target] != NULL)
+                  {
+                    // The fused edge is a loop back-edge, which is what this
+                    // shape almost always is: `skip ; JP top` is how CHIP-8
+                    // spells "loop while". Close it.
+                    CLOSE_BACKEDGE(pc_block[fused_target]);
+                  }
+                else
+                  {
+                    gcc_jit_block_end_with_void_return(blk, NULL);
+                  }
               }
             else
               {
@@ -950,6 +1033,7 @@ code codegen(void)
 
  end_of_trace:
   gcc_jit_block_end_with_void_return(blk, NULL);
+ trace_terminated: // blk was already terminated by a closed back edge
 
   { const char *e = gcc_jit_context_get_first_error(ctx);
     if (e) fprintf(stderr, "JITERR @ %s: %s\n", fn_name, e); }
@@ -971,6 +1055,7 @@ code codegen(void)
   return fn;
 
   #undef SAFEPOINT
+  #undef CLOSE_BACKEDGE
   #undef PC_LVAL
   #undef STEP_AND_CONTINUE
   #undef CALL_HOST

@@ -18,6 +18,13 @@ Both JITs compile one native function per entry PC, cache it, and extend traces
 across unconditional jumps and the taken side of skips; awkward opcodes (control
 flow, I/O, blocking input) are emitted as calls to shared C helper routines.
 
+A jump whose target is an address the trace has already compiled is closed as a
+branch to that code rather than a return, so a CHIP-8 loop runs as a native
+loop instead of costing a dispatcher round trip and a trace-cache lookup per
+iteration. Because a trace can then loop indefinitely without returning, each
+closed back-edge carries a safepoint and a test of `program_over`, which is
+where the end of the run, an error, and the quit key are all observed.
+
 Because CHIP-8 keeps code and data in one 4 KiB address space, the stores
 (`Fx33`, `Fx55`) may be self-modifying, and a trace compiled from overwritten
 bytes would be stale. Each backend records the bytes codegen read while

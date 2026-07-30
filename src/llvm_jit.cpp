@@ -131,6 +131,28 @@
     builder->SetInsertPoint(basic_block); \
   }
 
+// Close a back edge: branch to `dst`, a block already emitted in this trace,
+// instead of returning to the dispatcher. Terminates the current block.
+//
+// The dispatcher is where program_over (end of run, error, quit key) was
+// observed, and a returning back-edge visited it once per loop iteration. A
+// loop that stays inside the trace has to observe it itself, or a CHIP-8 spin
+// loop -- `JP self`, which every ROM ends with -- would never exit. The load
+// is volatile so it cannot be hoisted out of the loop the branch has just
+// created; the safepoint above it is what makes the flag change at all.
+#define JIT_CLOSE_BACKEDGE(dst) \
+  { \
+    auto i8ty_be = llvm::Type::getInt8Ty(*context); \
+    auto over_loc = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(void *)*8, reinterpret_cast<uint64_t>(&program_over), false)); \
+    auto over_ptr = builder->CreateIntToPtr(over_loc, llvm::PointerType::getUnqual(*context)); \
+    auto over_val = builder->CreateLoad(i8ty_be, over_ptr, true /* volatile */); \
+    auto over = builder->CreateICmpNE(over_val, llvm::ConstantInt::get(i8ty_be, 0)); \
+    auto exit_block = llvm::BasicBlock::Create(*context, "", function); \
+    builder->CreateCondBr(over, exit_block, (dst)); \
+    builder->SetInsertPoint(exit_block); \
+    JIT_RETURN; \
+  }
+
 // ------------------------------------------------------------------------
 
 int last_tick = 0;
@@ -183,6 +205,8 @@ static void note_store(uint16_t a, unsigned n)
 volatile sig_atomic_t interrupt_pending = 0;
 static_assert(sizeof(sig_atomic_t) == sizeof(int32_t),
               "JIT_SAFEPOINT emits a 32-bit load of interrupt_pending");
+static_assert(sizeof(program_over) == 1,
+              "JIT_CLOSE_BACKEDGE emits an 8-bit load of program_over");
 #ifndef BENCH
 static timer_t interrupt_timer;
 
@@ -338,6 +362,14 @@ extern "C"
       {
         interrupt_pending = 0;
         interrupt();
+        // The dispatcher observes the quit key between traces, which was every
+        // loop iteration back when a back-edge returned. Traces now close their
+        // own loops, so a spin loop need never come back -- the quit key has to
+        // be observed here too, or it would be ignored until the loop exits.
+        if (all_keys_down() & (1u << 31))
+          {
+            program_over = true;
+          }
       }
 #endif
   }
@@ -568,10 +600,38 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   llvm::BasicBlock * basic_block = llvm::BasicBlock::Create(*context, "", function);
   builder->SetInsertPoint(basic_block);
 
+  // The block each CHIP-8 address was emitted into, for this trace only. A
+  // jump whose target is already in here is a back edge into code we have
+  // compiled, and can be closed as a branch; anything else still ends the
+  // trace. Straight-line blocks cost nothing -- both backends fold them away.
+  std::vector<llvm::BasicBlock *> pc_block(MEMORY_SIZE, nullptr);
+
   for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
   {
     op = OPCODE_AT(pc);
     mark_code(pc, 2);
+
+    if (pc_block[pc] != nullptr)
+      {
+        // Fell through onto an address this trace already compiled. Close the
+        // loop rather than emit it twice; the safepoint keeps input and timers
+        // serviced once per iteration, exactly as the jump case does.
+        JIT_SAFEPOINT;
+        JIT_GETPTR16(program_counter);
+        builder->CreateStore(builder->getInt16(pc), JIT_PTR(program_counter));
+        JIT_CLOSE_BACKEDGE(pc_block[pc]);
+        goto trace_terminated;
+      }
+
+    {
+      // One block per instruction, so that any address in the trace is a
+      // branch target.
+      auto pc_blk = llvm::BasicBlock::Create(*context, "", function);
+      builder->CreateBr(pc_blk);
+      basic_block = pc_blk;
+      builder->SetInsertPoint(basic_block);
+      pc_block[pc] = pc_blk;
+    }
 
     // Periodic safepoint: bound the number of straight-line (or taken-skip)
     // instructions that can execute between input/timer checks.
@@ -602,7 +662,17 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           JIT_SAFEPOINT;
           JIT_GETPTR16(program_counter);
           builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(program_counter));
-          if ((pc != immediate) && (op_count < (1<<8)))
+          if (pc_block[immediate] != nullptr)
+            {
+              // Back edge into this trace -- including the self-loop
+              // `JP self`. Branch to the block instead of returning: the whole
+              // loop now runs as one native loop, where it used to cost a
+              // dispatcher round trip (and, for a self-loop, a trace-cache
+              // lookup) on every single iteration.
+              JIT_CLOSE_BACKEDGE(pc_block[immediate]);
+              goto trace_terminated;
+            }
+          if (op_count < (1<<8))
             {
               pc = immediate-2;
               continue;
@@ -690,7 +760,17 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               JIT_SAFEPOINT;
               builder->CreateStore(builder->getInt16(fused_target),
                                    JIT_PTR(program_counter)); // set VM pc
-              JIT_RETURN; // return control
+              if (pc_block[fused_target] != nullptr)
+                {
+                  // The fused edge is a loop back-edge, which is what this
+                  // shape almost always is: `skip ; JP top` is how CHIP-8
+                  // spells "loop while". Close it.
+                  JIT_CLOSE_BACKEDGE(pc_block[fused_target]);
+                }
+              else
+                {
+                  JIT_RETURN; // return control
+                }
             }
           else
             {
@@ -968,9 +1048,10 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   }
 
  end_of_trace:
+  JIT_RETURN;
+ trace_terminated: // the current block was already terminated by a closed back edge
 
   // Generate code
-  JIT_RETURN;
   MPM.run(*module, MAM);
   auto safe_module = llvm::orc::ThreadSafeModule(std::move(module), std::move(context));
   auto RT = JIT->getMainJITDylib().createResourceTracker();
