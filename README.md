@@ -66,6 +66,52 @@ the hex keys `0`-`9` and `a`-`f`; press `q` or `Escape` to quit. On exit the
 register file, program counter, address register, and timers are dumped to
 stderr.
 
+## Benchmarking and differential testing
+
+An ordinary run is not reproducible: the RNG is seeded from the clock, the
+60 Hz timers follow `CLOCK_MONOTONIC` (and, in the JITs, a `SIGALRM` interval
+timer), input arrives when the terminal delivers it, and no ROM terminates. So
+two runs never agree, and neither timings nor final state can be compared.
+
+`make bench` builds a second copy of each engine with `-DBENCH`, which replaces
+every one of those inputs with something reproducible: a fixed seed, a virtual
+60 Hz clock driven by retired instructions, a synthetic keyboard derived from
+that clock, headless I/O with the same framebuffer and collision semantics, and
+a stop after a set number of instructions.
+
+```sh
+make -C src bench            # needs the libgccjit flags above
+./src/chip8-llvm-bench roms/PONG --instructions 5000000
+./src/chip8-llvm-bench roms/PONG --instructions 5000000 --seed 7 --keys none
+```
+
+The report on stderr adds the machine state to `retired` (architectural CHIP-8
+instructions), `compiled` and `flushes` (JIT compile pressure and how often
+self-modifying writes discarded the trace cache), a `display` hash of the
+framebuffer, elapsed time, and a `rate` in retired instructions per second.
+
+`scripts/bench_diff.py` runs the engines against each other:
+
+```sh
+python3 scripts/bench_diff.py --instructions 1000000          # all stock ROMs
+python3 scripts/bench_diff.py --engines llvm roms/BLINKY
+```
+
+A JIT cannot stop on an exact instruction count -- a trace only notices the
+budget at a safepoint -- so the script reads each JIT's actual retired count
+and re-runs the interpreter to precisely that point. Both engines have then
+executed the same instruction sequence from the same state, and every
+register, timer, the PC, and the display hash must agree exactly; anything
+else is a real divergence.
+
+Two properties are worth preserving when touching a JIT. Timer values must
+stay a function of the virtual clock alone rather than of how often an engine
+services interrupts, which is why every timer access calls `sync_timers()`.
+And `bench_retired` counts *architectural* instructions, not emitted
+operations: a peephole that folds several opcodes into one native sequence
+must still account for all of them, or its virtual clock drifts away from the
+interpreter's and the comparison stops meaning anything.
+
 ## Assembling ROMs
 
 `chip8-asm` reads source from a file and writes the raw ROM payload to standard

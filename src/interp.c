@@ -6,6 +6,7 @@
 
 #include "chip8.h"
 #include "io.h"
+#include "bench.h"
 
 #define ERROR {return (op << 16) | program_counter;}
 #define STEP {program_counter+=2; return 0;}
@@ -30,14 +31,21 @@ int interrupt_count = 0;
 
 void clear_key(uint8_t key)
 {
+#ifdef BENCH
+  bench_clear_key(key);
+#else
   for (int i = 0; i < INPUT_TICKS; ++i)
     {
       keys_down[i] &= ~(1u << key);
     }
+#endif
 }
 
 uint32_t all_keys_down()
 {
+#ifdef BENCH
+  return bench_keys_now();
+#else
   uint32_t all_keys = 0;
 
   for (int i = 0; i < INPUT_TICKS; ++i)
@@ -45,18 +53,47 @@ uint32_t all_keys_down()
       all_keys |= keys_down[i];
     }
   return all_keys;
+#endif
 }
 
 int tick()
 {
+#ifdef BENCH
+  return bench_tick();
+#else
   struct timespec spec;
 
   clock_gettime(CLOCK_MONOTONIC, &spec);
   return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
+#endif
 }
+
+#ifdef BENCH
+// Catch the 60 Hz timers up to the virtual clock. Called wherever a timer is
+// read or written, so the value observed depends only on how many
+// instructions have retired -- not on how often this particular engine
+// happens to service interrupts. Without it the interpreter (which services
+// on every jump) and the JITs (which service at safepoints) disagree
+// whenever a timer is read close to a tick boundary.
+void sync_timers(void)
+{
+  int now = tick();
+  int elapsed = now - last_tick;
+
+  if (elapsed > 0)
+    {
+      delay_timer = (delay_timer > elapsed) ? (uint8_t)(delay_timer - elapsed) : 0;
+      sound_timer = (sound_timer > elapsed) ? (uint8_t)(sound_timer - elapsed) : 0;
+      last_tick = now;
+    }
+}
+#endif
 
 void interrupt()
 {
+#ifdef BENCH
+  sync_timers(); // keys are polled on demand, not ringed
+#else
   int current_tick = tick();
 
   if (current_tick != last_tick)
@@ -73,6 +110,7 @@ void interrupt()
     }
   keys_down[interrupt_count] = read_keys_io();
   interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
+#endif
 }
 
 uint32_t clearscreen()
@@ -291,6 +329,9 @@ uint32_t get_delay_timer()
 {
   X;
 
+#ifdef BENCH
+  sync_timers(); // observe the timer at the current virtual clock
+#endif
   regs[x] = delay_timer;
   STEP;
 }
@@ -299,6 +340,9 @@ uint32_t set_delay_timer()
 {
   X;
 
+#ifdef BENCH
+  sync_timers(); // observe the timer at the current virtual clock
+#endif
   delay_timer = regs[x];
   STEP;
 }
@@ -307,6 +351,9 @@ uint32_t set_sound_timer()
 {
   X;
 
+#ifdef BENCH
+  sync_timers(); // observe the timer at the current virtual clock
+#endif
   sound_timer = regs[x];
   STEP;
 }
@@ -354,8 +401,19 @@ uint32_t load_on_key()
 
   do
     {
+#ifdef BENCH
+      // Polling charges the virtual clock, so the synthetic keyboard always
+      // delivers eventually; bail out if the run is over regardless (--keys
+      // none never produces one).
+      all_keys = read_keys_io();
+      if (bench_done())
+        {
+          break;
+        }
+#else
       usleep(10);
       all_keys = read_keys_io();
+#endif
     } while((all_keys) == 0);
 
   for (int i = 0; i < 16; ++i)
@@ -389,11 +447,18 @@ uint32_t draw()
       sprite[i] = MEM_AT(addr+i);
     }
   FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
+#ifndef BENCH
+  // Frame sync: hold the draw until the 60 Hz tick rolls over. Skipped in
+  // bench mode -- there is no display to pace, and blocking on a clock that
+  // only advances with retired instructions would deadlock.
   while((current_tick = tick()) == last_tick)
     {
       usleep(NANOS_PER_TICK>>10);
     }
   last_tick = current_tick;
+#else
+  (void)current_tick;
+#endif
   refresh_io();
   STEP;
 }
@@ -547,18 +612,27 @@ int main(int argc, const char * argv[])
 {
   FILE * fp;
   int inst_count = 0;
+  const char *rom;
 
+#ifdef BENCH
+  if (bench_parse_args(argc, argv, &rom) != 0)
+    {
+      exit(-1);
+    }
+#else
   if (argc <= 1)
     {
       fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
       exit(-1);
     }
+  rom = argv[1];
+#endif
 
   // load
-  fp = fopen(argv[1], "rb");
+  fp = fopen(rom, "rb");
   if (fp == NULL)
     {
-      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      fprintf(stderr, "Could not open ROM %s\n", rom);
       exit(-1);
     }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
@@ -583,17 +657,34 @@ int main(int argc, const char * argv[])
         {
           break;
         }
+#ifdef BENCH
+      // Count before executing, exactly as the JITs' emitted accounting does:
+      // an instruction that reads a timer must see the same virtual clock in
+      // every engine, and a one-instruction offset is enough to land on the
+      // far side of a tick boundary.
+      ++bench_retired;
+#endif
       if (basic_block())
         {
           break;
         }
       inst_count++;
+#ifdef BENCH
+      if (bench_done())
+        {
+          break;
+        }
+#endif
     }
 
   deinit_io();
   deinit_chip8();
 
+#ifdef BENCH
+  bench_report("interp", "chip-8 instructions", inst_count);
+#else
   dump_chip8_state("chip-8 instructions", inst_count);
+#endif
 
   exit(0);
 }

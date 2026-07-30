@@ -9,3 +9,6 @@ chip8-disas
 chip8-llvm
 chip8-libgccjit
 chip8-asm
+chip8-interp-bench
+chip8-libgccjit-bench
+chip8-llvm-bench

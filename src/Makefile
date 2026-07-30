@@ -10,6 +10,10 @@ GCCJIT_LIBS = -lgccjit
 
 all: chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm
 
+# Deterministic benchmark / differential-test builds: same engines, headless
+# I/O, virtual clock, fixed seed, instruction budget. See bench.h.
+bench: chip8-interp-bench chip8-llvm-bench chip8-libgccjit-bench
+
 chip8-llvm: llvm_jit.o chip8.o ncurses_io.o
 	$(CXX) $^ $(LLVM_LIBS) -Xlinker -E $(LDFLAGS) -lncurses -o $@
 
@@ -31,6 +35,21 @@ llvm_jit.o: llvm_jit.cpp
 libgccjit_jit.o: libgccjit_jit.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $< -c -o $@
 
+chip8-llvm-bench: llvm_jit.bench.o chip8.bench.o bench_io.bench.o
+	$(CXX) $^ $(LLVM_LIBS) -Xlinker -E $(LDFLAGS) -o $@
+
+chip8-libgccjit-bench: libgccjit_jit.bench.o chip8.bench.o bench_io.bench.o
+	$(CC) $^ $(LDFLAGS) -rdynamic $(GCCJIT_LIBS) -o $@
+
+chip8-interp-bench: interp.bench.o chip8.bench.o bench_io.bench.o
+	$(CC) $^ $(LDFLAGS) -o $@
+
+llvm_jit.bench.o: llvm_jit.cpp
+	$(CXX) $(CFLAGS) $(CXXSTD) $(CXXFLAGS) -DBENCH $(shell $(LLVM_CONFIG) --cxxflags) $< -c -o $@
+
+%.bench.o: %.c
+	$(CC) $(CFLAGS) -DBENCH $(CPPFLAGS) $< -c -o $@
+
 test: chip8-asm chip8-disas
 	python3 ../tests/test_asm.py
 	python3 ../tests/test_opt.py
@@ -40,7 +59,8 @@ clean:
 
 cleanest: clean
 	rm -f chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm
+	rm -f chip8-interp-bench chip8-llvm-bench chip8-libgccjit-bench
 
-.PHONY: all test clean cleanest
+.PHONY: all bench test clean cleanest
 
 -include $(wildcard *.d)

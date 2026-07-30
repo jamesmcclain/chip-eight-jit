@@ -8,6 +8,7 @@
 #include <libgccjit.h>
 
 #include "chip8.h"
+#include "bench.h"
 #include "io.h"
 
 // ------------------------------------------------------------------------
@@ -41,6 +42,7 @@ volatile sig_atomic_t smc_pending = 0;
 // is not async-signal-safe, so the actual polling happens synchronously in
 // check_interrupt() at safepoints emitted into the JITed traces).
 volatile sig_atomic_t interrupt_pending = 0;
+#ifndef BENCH
 static timer_t interrupt_timer;
 
 static void alarm_handler(int signum)
@@ -48,9 +50,14 @@ static void alarm_handler(int signum)
   (void)signum;
   interrupt_pending = 1;
 }
+#endif
 
 static void init_interrupt_timer(void)
 {
+#ifdef BENCH
+  interrupt_pending = 1; // pinned; see check_interrupt()
+  return;
+#else
   struct sigaction sa;
   struct sigevent sev;
   struct itimerspec its;
@@ -70,11 +77,14 @@ static void init_interrupt_timer(void)
   its.it_interval.tv_nsec = NANOS_PER_TICK / INPUT_TICKS;
   its.it_value = its.it_interval;
   timer_settime(interrupt_timer, 0, &its, NULL);
+#endif
 }
 
 static void deinit_interrupt_timer(void)
 {
+#ifndef BENCH
   timer_delete(interrupt_timer);
+#endif
 }
 
 typedef void (*code)(void); // pointer to a compiled trace
@@ -93,14 +103,21 @@ typedef void (*code)(void); // pointer to a compiled trace
 
 void clear_key(uint8_t key)
 {
+#ifdef BENCH
+  bench_clear_key(key);
+#else
   for (int i = 0; i < INPUT_TICKS; ++i)
     {
       keys_down[i] &= ~(1u << key);
     }
+#endif
 }
 
 uint32_t all_keys_down()
 {
+#ifdef BENCH
+  return bench_keys_now();
+#else
   uint32_t all_keys = 0;
 
   for (int i = 0; i < INPUT_TICKS; ++i)
@@ -108,18 +125,47 @@ uint32_t all_keys_down()
       all_keys |= keys_down[i];
     }
   return all_keys;
+#endif
 }
 
 int tick()
 {
+#ifdef BENCH
+  return bench_tick();
+#else
   struct timespec spec;
 
   clock_gettime(CLOCK_MONOTONIC, &spec);
   return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
+#endif
 }
+
+#ifdef BENCH
+// Catch the 60 Hz timers up to the virtual clock. Called wherever a timer is
+// read or written, so the value observed depends only on how many
+// instructions have retired -- not on how often this particular engine
+// happens to service interrupts. Without it the interpreter (which services
+// on every jump) and the JITs (which service at safepoints) disagree
+// whenever a timer is read close to a tick boundary.
+void sync_timers(void)
+{
+  int now = tick();
+  int elapsed = now - last_tick;
+
+  if (elapsed > 0)
+    {
+      delay_timer = (delay_timer > elapsed) ? (uint8_t)(delay_timer - elapsed) : 0;
+      sound_timer = (sound_timer > elapsed) ? (uint8_t)(sound_timer - elapsed) : 0;
+      last_tick = now;
+    }
+}
+#endif
 
 void interrupt()
 {
+#ifdef BENCH
+  sync_timers(); // keys are polled on demand, not ringed
+#else
   int current_tick = tick();
 
   if (current_tick != last_tick)
@@ -136,6 +182,7 @@ void interrupt()
     }
   keys_down[interrupt_count] = read_keys_io();
   interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
+#endif
 }
 
 // Slow path of a safepoint: service timers and input iff the asynchronous
@@ -144,11 +191,22 @@ void interrupt()
 // symbol table (see HOST_FNS) so JITed traces can call it.
 void check_interrupt()
 {
+#ifdef BENCH
+  // No asynchronous timer in bench mode: interrupt_pending stays pinned so
+  // that every emitted safepoint takes this path, making the servicing
+  // points a property of the compiled code rather than of wall-clock time.
+  interrupt();
+  if (bench_done())
+    {
+      program_over = 1;
+    }
+#else
   if (interrupt_pending)
     {
       interrupt_pending = 0;
       interrupt();
     }
+#endif
 }
 
 void errer()
@@ -241,8 +299,20 @@ void load_on_key()
 
   do
     {
+#ifdef BENCH
+      // Polling charges the virtual clock, so the synthetic keyboard always
+      // delivers eventually; bail out if the run is over regardless (--keys
+      // none never produces one).
+      all_keys = read_keys_io();
+      if (bench_done())
+        {
+          program_over = 1;
+          break;
+        }
+#else
       usleep(10);
       all_keys = read_keys_io();
+#endif
     } while((all_keys) == 0);
 
   for (int i = 0; i < 16; ++i)
@@ -279,11 +349,18 @@ void draw()
       sprite[i] = MEM_AT(addr+i);
     }
   FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
+#ifndef BENCH
+  // Frame sync: hold the draw until the 60 Hz tick rolls over. Skipped in
+  // bench mode -- there is no display to pace, and blocking on a clock that
+  // only advances with retired instructions would deadlock.
   while((current_tick = tick()) == last_tick)
     {
       usleep(NANOS_PER_TICK>>10);
     }
   last_tick = current_tick;
+#else
+  (void)current_tick;
+#endif
   refresh_io();
 }
 
@@ -346,6 +423,9 @@ static const char *HOST_FNS[] = {
   "interrupt", "check_interrupt", "clearscreen_io", "retern", "call", "random_byte", "draw",
   "skip_key_x_down", "skip_key_x_up", "load_on_key", "store_bcd",
   "save_registers", "restore_registers",
+#ifdef BENCH
+  "sync_timers",
+#endif
 };
 #define N_HOST_FNS ((int)(sizeof(HOST_FNS)/sizeof(HOST_FNS[0])))
 
@@ -414,6 +494,10 @@ code codegen(void)
   gcc_jit_type *t_u16p = gcc_jit_type_get_pointer(t_u16);
   gcc_jit_type *t_int  = gcc_jit_context_get_type(ctx, GCC_JIT_TYPE_INT);
   gcc_jit_type *t_vintp = gcc_jit_type_get_pointer(gcc_jit_type_get_volatile(t_int));
+#ifdef BENCH
+  gcc_jit_type *t_i64  = gcc_jit_context_get_int_type(ctx, 8, 1);
+  gcc_jit_type *t_i64p = gcc_jit_type_get_pointer(t_i64);
+#endif
 
   // The trace itself: void ADDRxxxx(void).
   gcc_jit_function *function =
@@ -469,6 +553,19 @@ code codegen(void)
       blk = cont_blk; \
     } while (0)
 
+  // Bench builds account for architectural CHIP-8 instructions so that the
+  // virtual clock matches the interpreter's. The count is of instructions the
+  // trace stands in for, not of emitted operations: a peephole that folds two
+  // opcodes into one native sequence still retires two.
+#ifdef BENCH
+  #define RETIRE_IN(b, n) \
+    gcc_jit_block_add_assignment_op((b), NULL, mem(ctx, t_i64p, &bench_retired), \
+      GCC_JIT_BINARY_OP_PLUS, gcc_jit_context_new_rvalue_from_int(ctx, t_i64, (n)))
+#else
+  #define RETIRE_IN(b, n) do { (void)(b); } while (0)
+#endif
+  #define RETIRE(n) RETIRE_IN(blk, (n))
+
   int local_id = 0;
   int block_id = 0;
 
@@ -482,6 +579,8 @@ code codegen(void)
         {
           SAFEPOINT();
         }
+
+      RETIRE(1);
 
       if (op == 0x00e0)
         { // clear screen
@@ -567,6 +666,7 @@ code codegen(void)
                 // These edges are usually loop back-edges, so they keep the
                 // safepoint the jump itself would have emitted.
                 blk = else_blk;
+                RETIRE(1); // the folded 1NNN still retires
                 SAFEPOINT();
                 gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
                   gcc_jit_context_new_rvalue_from_int(ctx, t_u16, fused_target));
@@ -742,6 +842,9 @@ code codegen(void)
               case 0x07:
                 { // Vx = delay_timer
                   X;
+#ifdef BENCH
+                  CALL_HOST("sync_timers"); // read/write the timer at the current clock
+#endif
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &regs[x]),
                     gcc_jit_lvalue_as_rvalue(mem(ctx, t_u8p, &delay_timer)));
                   STEP_AND_CONTINUE;
@@ -754,6 +857,9 @@ code codegen(void)
               case 0x15:
                 { // delay_timer = Vx
                   X;
+#ifdef BENCH
+                  CALL_HOST("sync_timers"); // read/write the timer at the current clock
+#endif
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &delay_timer),
                     gcc_jit_lvalue_as_rvalue(mem(ctx, t_u8p, &regs[x])));
                   STEP_AND_CONTINUE;
@@ -761,6 +867,9 @@ code codegen(void)
               case 0x18:
                 { // sound_timer = Vx
                   X;
+#ifdef BENCH
+                  CALL_HOST("sync_timers"); // read/write the timer at the current clock
+#endif
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &sound_timer),
                     gcc_jit_lvalue_as_rvalue(mem(ctx, t_u8p, &regs[x])));
                   STEP_AND_CONTINUE;
@@ -829,6 +938,8 @@ code codegen(void)
   #undef STEP_AND_CONTINUE
   #undef CALL_HOST
   #undef BAIL_ERRER
+  #undef RETIRE
+  #undef RETIRE_IN
 }
 
 // ------------------------------------------------------------------------
@@ -839,18 +950,27 @@ int main(int argc, const char * argv[])
 {
   FILE * fp;
   int trace_count = 0;
+  const char *rom;
 
+#ifdef BENCH
+  if (bench_parse_args(argc, argv, &rom) != 0)
+    {
+      exit(-1);
+    }
+#else
   if (argc <= 1)
     {
       fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
       exit(-1);
     }
+  rom = argv[1];
+#endif
 
   // Load program
-  fp = fopen(argv[1], "rb");
+  fp = fopen(rom, "rb");
   if (fp == NULL)
     {
-      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      fprintf(stderr, "Could not open ROM %s\n", rom);
       exit(-1);
     }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
@@ -880,6 +1000,9 @@ int main(int argc, const char * argv[])
               break;
             }
           trace_cache[program_counter] = compiled;
+#ifdef BENCH
+          ++bench_compiled;
+#endif
           continue;
         }
       c();
@@ -898,6 +1021,9 @@ int main(int argc, const char * argv[])
           cap_trace_results = 0;
           memset(trace_cache, 0, sizeof(trace_cache));
           smc_pending = 0;
+#ifdef BENCH
+          ++bench_flushes;
+#endif
         }
 
       if ((all_keys_down() & (1<<31)) || program_over)
@@ -911,7 +1037,11 @@ int main(int argc, const char * argv[])
   deinit_io();
   deinit_chip8();
 
+#ifdef BENCH
+  bench_report("libgccjit", "traces", trace_count);
+#else
   dump_chip8_state("traces", trace_count);
+#endif
 
   teardown_jit();
 
