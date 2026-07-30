@@ -18,6 +18,16 @@ Both JITs compile one native function per entry PC, cache it, and extend traces
 across unconditional jumps and the taken side of skips; awkward opcodes (control
 flow, I/O, blocking input) are emitted as calls to shared C helper routines.
 
+Because CHIP-8 keeps code and data in one 4 KiB address space, the stores
+(`Fx33`, `Fx55`) may be self-modifying, and a trace compiled from overwritten
+bytes would be stale. Each backend records the bytes codegen read while
+building the traces currently in its cache, and a store raises the
+invalidation flag only if it lands on one of them; the next trip through the
+dispatcher then discards the cache. Most ROMs store a BCD score or spill
+registers to a scratch buffer several times a second and never touch code, so
+this is the difference between recompiling the program at frame rate and not
+recompiling it at all.
+
 Timers and input in the JIT backends are driven asynchronously: a POSIX
 interval timer raises `SIGALRM` several hundred times a second and its handler
 sets a flag; compiled traces contain lightweight safepoints (a volatile load

@@ -142,6 +142,40 @@ int interrupt_count = 0;
 bool program_over = false;
 volatile sig_atomic_t smc_pending = 0;
 
+// Bytes the compiler has read while building a trace still in the cache.
+//
+// RAM and code share one 4 KiB address space, so any Fx33/Fx55 store *could*
+// be self-modifying -- but on real ROMs it almost never is. The common pattern
+// is BCD-ing a score into a scratch buffer, or spilling registers, several
+// times a second; treating those as code writes discarded every compiled trace
+// and made the JIT recompile the program from scratch at frame rate. Recording
+// which bytes codegen actually depended on lets a store be recognized as
+// harmless, and reduces the whole-cache flush to the rare case of a ROM that
+// really does rewrite its own instructions.
+static uint8_t code_bytes[MEMORY_SIZE];
+
+// Called for every byte codegen reads: the opcode stream itself, and anything
+// a peephole folds in (the skip+jump fusion reads the instruction after the
+// skip). Anything the compiler baked into native code must be covered here, or
+// a write over it will go unnoticed.
+static void mark_code(uint16_t a, unsigned n)
+{
+  for (unsigned i = 0; i < n; ++i)
+    code_bytes[(a + i) & (MEMORY_SIZE - 1)] = 1;
+}
+
+// Raise smc_pending only if [a, a+n) overlaps a byte some live trace was
+// compiled from.
+static void note_store(uint16_t a, unsigned n)
+{
+  for (unsigned i = 0; i < n; ++i)
+    if (code_bytes[(a + i) & (MEMORY_SIZE - 1)])
+      {
+        smc_pending = 1;
+        return;
+      }
+}
+
 // Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
 // INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
 // is not async-signal-safe, so the actual polling happens synchronously in
@@ -351,9 +385,9 @@ extern "C"
 
   void store_bcd()
   {
-    smc_pending = 1;
     OP;
     X;
+    note_store(addr, 3);
     uint8_t tmp = regs[x];
     uint8_t hundreds, tens;
 
@@ -465,9 +499,9 @@ extern "C"
 
   void save_registers()
   {
-    smc_pending = 1;
     OP;
     X;
+    note_store(addr, x + 1);
 
     for (int i = 0; i <= x; ++i)
       {
@@ -537,6 +571,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
   {
     op = OPCODE_AT(pc);
+    mark_code(pc, 2);
 
     // Periodic safepoint: bound the number of straight-line (or taken-skip)
     // instructions that can execute between input/timer checks.
@@ -598,9 +633,11 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           // conditional branch, sending the not-taken edge straight to NNN
           // rather than stepping past the skip and bouncing to the dispatcher
           // only to run a jump. The skipped opcode is read at compile time,
-          // which is what trace extension already assumes; a ROM that writes
-          // over it raises smc_pending and the whole cache is discarded.
+          // which is what trace extension already assumes, so it is marked as
+          // code below: a ROM that writes over it raises smc_pending and the
+          // cache is discarded.
           uint16_t fused_op = OPCODE_AT((uint16_t)(pc + 2));
+          mark_code((uint16_t)(pc + 2), 2);
           bool fused = ((fused_op & 0xf000) == 0x1000);
           uint16_t fused_target = fused_op & 0x0fff;
 
@@ -956,6 +993,8 @@ void invalidate_traces()
   trace_resources.clear();
   if (trace_cache)
     trace_cache->clear();
+  // No trace survives, so nothing is code until it is compiled again.
+  memset(code_bytes, 0, sizeof(code_bytes));
   smc_pending = 0;
 #ifdef BENCH
   ++bench_flushes;
