@@ -521,6 +521,17 @@ code codegen(void)
         case 0x9: // skip if Vx != Vy
           {
             char tname[24], ename[24];
+            // CHIP-8 has no conditional branch: every one is written as a skip
+            // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
+            // when the skip is not taken". Fuse the pair into a single
+            // conditional branch, sending the not-taken edge straight to NNN
+            // rather than stepping past the skip and bouncing to the dispatcher
+            // only to run a jump. The skipped opcode is read at compile time,
+            // which is what trace extension already assumes; a ROM that writes
+            // over it raises smc_pending and the whole cache is discarded.
+            uint16_t fused_op = OP_AT((uint16_t)(pc + 2));
+            int fused = ((fused_op & 0xf000) == 0x1000);
+            uint16_t fused_target = fused_op & 0x0fff;
             snprintf(tname, sizeof(tname), "skip_%d", block_id);
             snprintf(ename, sizeof(ename), "noskip_%d", block_id);
             ++block_id;
@@ -550,10 +561,24 @@ code codegen(void)
             }
             gcc_jit_block_end_with_conditional(blk, NULL, cond, then_blk, else_blk);
 
-            // "don't skip": advance one instruction and bounce to dispatch.
-            gcc_jit_block_add_assignment_op(else_blk, NULL,
-              mem(ctx, t_u16p, &program_counter), GCC_JIT_BINARY_OP_PLUS, two16);
-            gcc_jit_block_end_with_void_return(else_blk, NULL);
+            if (fused)
+              {
+                // "don't skip" with the jump folded in: land on NNN directly.
+                // These edges are usually loop back-edges, so they keep the
+                // safepoint the jump itself would have emitted.
+                blk = else_blk;
+                SAFEPOINT();
+                gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
+                  gcc_jit_context_new_rvalue_from_int(ctx, t_u16, fused_target));
+                gcc_jit_block_end_with_void_return(blk, NULL);
+              }
+            else
+              {
+                // "don't skip": advance one instruction and bounce to dispatch.
+                gcc_jit_block_add_assignment_op(else_blk, NULL,
+                  mem(ctx, t_u16p, &program_counter), GCC_JIT_BINARY_OP_PLUS, two16);
+                gcc_jit_block_end_with_void_return(else_blk, NULL);
+              }
 
             // "skip": advance two instructions and keep compiling inline.
             blk = then_blk;

@@ -499,6 +499,18 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           JIT_GETPTR16(program_counter);
           JIT_LOAD16(program_counter);
 
+          // CHIP-8 has no conditional branch: every one is written as a skip
+          // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
+          // when the skip is not taken". Fuse the pair into a single
+          // conditional branch, sending the not-taken edge straight to NNN
+          // rather than stepping past the skip and bouncing to the dispatcher
+          // only to run a jump. The skipped opcode is read at compile time,
+          // which is what trace extension already assumes; a ROM that writes
+          // over it raises smc_pending and the whole cache is discarded.
+          uint16_t fused_op = OPCODE_AT((uint16_t)(pc + 2));
+          bool fused = ((fused_op & 0xf000) == 0x1000);
+          uint16_t fused_target = fused_op & 0x0fff;
+
           // Generate comparison
           auto then_block = llvm::BasicBlock::Create(*context, "", function);
           auto else_block = llvm::BasicBlock::Create(*context, "", function);
@@ -538,9 +550,23 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 
           // "else" (don't skip) block
           builder->SetInsertPoint(else_block);
-          auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two);
-          builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); // set VM pc
-          JIT_RETURN; // return control
+          if (fused)
+            {
+              // The jump is folded in: land on NNN directly. These edges are
+              // usually loop back-edges, so they keep the safepoint the jump
+              // itself would have emitted.
+              basic_block = else_block;
+              JIT_SAFEPOINT;
+              builder->CreateStore(builder->getInt16(fused_target),
+                                   JIT_PTR(program_counter)); // set VM pc
+              JIT_RETURN; // return control
+            }
+          else
+            {
+              auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two);
+              builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); // set VM pc
+              JIT_RETURN; // return control
+            }
 
           // "then" (do skip) block
           basic_block = then_block;
