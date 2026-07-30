@@ -8,6 +8,7 @@
 #include <libgccjit.h>
 
 #include "chip8.h"
+#include "bench.h"
 #include "io.h"
 
 // ------------------------------------------------------------------------
@@ -36,11 +37,46 @@ int interrupt_count = 0;
 int program_over = 0;
 volatile sig_atomic_t smc_pending = 0;
 
+// Bytes the compiler has read while building a trace still in the cache.
+//
+// RAM and code share one 4 KiB address space, so any Fx33/Fx55 store *could*
+// be self-modifying -- but on real ROMs it almost never is. The common pattern
+// is BCD-ing a score into a scratch buffer, or spilling registers, several
+// times a second; treating those as code writes discarded every compiled trace
+// and made the JIT recompile the program from scratch at frame rate. Recording
+// which bytes codegen actually depended on lets a store be recognized as
+// harmless, and reduces the whole-cache flush to the rare case of a ROM that
+// really does rewrite its own instructions.
+static uint8_t code_bytes[MEMORY_SIZE];
+
+// Called for every byte codegen reads: the opcode stream itself, and anything
+// a peephole folds in (the skip+jump fusion reads the instruction after the
+// skip). Anything the compiler baked into native code must be covered here, or
+// a write over it will go unnoticed.
+static void mark_code(uint16_t a, unsigned n)
+{
+  for (unsigned i = 0; i < n; ++i)
+    code_bytes[(a + i) & (MEMORY_SIZE - 1)] = 1;
+}
+
+// Raise smc_pending only if [a, a+n) overlaps a byte some live trace was
+// compiled from.
+static void note_store(uint16_t a, unsigned n)
+{
+  for (unsigned i = 0; i < n; ++i)
+    if (code_bytes[(a + i) & (MEMORY_SIZE - 1)])
+      {
+        smc_pending = 1;
+        return;
+      }
+}
+
 // Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
 // INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
 // is not async-signal-safe, so the actual polling happens synchronously in
 // check_interrupt() at safepoints emitted into the JITed traces).
 volatile sig_atomic_t interrupt_pending = 0;
+#ifndef BENCH
 static timer_t interrupt_timer;
 
 static void alarm_handler(int signum)
@@ -48,9 +84,14 @@ static void alarm_handler(int signum)
   (void)signum;
   interrupt_pending = 1;
 }
+#endif
 
 static void init_interrupt_timer(void)
 {
+#ifdef BENCH
+  interrupt_pending = 1; // pinned; see check_interrupt()
+  return;
+#else
   struct sigaction sa;
   struct sigevent sev;
   struct itimerspec its;
@@ -70,11 +111,14 @@ static void init_interrupt_timer(void)
   its.it_interval.tv_nsec = NANOS_PER_TICK / INPUT_TICKS;
   its.it_value = its.it_interval;
   timer_settime(interrupt_timer, 0, &its, NULL);
+#endif
 }
 
 static void deinit_interrupt_timer(void)
 {
+#ifndef BENCH
   timer_delete(interrupt_timer);
+#endif
 }
 
 typedef void (*code)(void); // pointer to a compiled trace
@@ -93,14 +137,21 @@ typedef void (*code)(void); // pointer to a compiled trace
 
 void clear_key(uint8_t key)
 {
+#ifdef BENCH
+  bench_clear_key(key);
+#else
   for (int i = 0; i < INPUT_TICKS; ++i)
     {
       keys_down[i] &= ~(1u << key);
     }
+#endif
 }
 
 uint32_t all_keys_down()
 {
+#ifdef BENCH
+  return bench_keys_now();
+#else
   uint32_t all_keys = 0;
 
   for (int i = 0; i < INPUT_TICKS; ++i)
@@ -108,18 +159,47 @@ uint32_t all_keys_down()
       all_keys |= keys_down[i];
     }
   return all_keys;
+#endif
 }
 
 int tick()
 {
+#ifdef BENCH
+  return bench_tick();
+#else
   struct timespec spec;
 
   clock_gettime(CLOCK_MONOTONIC, &spec);
   return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
+#endif
 }
+
+#ifdef BENCH
+// Catch the 60 Hz timers up to the virtual clock. Called wherever a timer is
+// read or written, so the value observed depends only on how many
+// instructions have retired -- not on how often this particular engine
+// happens to service interrupts. Without it the interpreter (which services
+// on every jump) and the JITs (which service at safepoints) disagree
+// whenever a timer is read close to a tick boundary.
+void sync_timers(void)
+{
+  int now = tick();
+  int elapsed = now - last_tick;
+
+  if (elapsed > 0)
+    {
+      delay_timer = (delay_timer > elapsed) ? (uint8_t)(delay_timer - elapsed) : 0;
+      sound_timer = (sound_timer > elapsed) ? (uint8_t)(sound_timer - elapsed) : 0;
+      last_tick = now;
+    }
+}
+#endif
 
 void interrupt()
 {
+#ifdef BENCH
+  sync_timers(); // keys are polled on demand, not ringed
+#else
   int current_tick = tick();
 
   if (current_tick != last_tick)
@@ -136,6 +216,7 @@ void interrupt()
     }
   keys_down[interrupt_count] = read_keys_io();
   interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
+#endif
 }
 
 // Slow path of a safepoint: service timers and input iff the asynchronous
@@ -144,11 +225,30 @@ void interrupt()
 // symbol table (see HOST_FNS) so JITed traces can call it.
 void check_interrupt()
 {
+#ifdef BENCH
+  // No asynchronous timer in bench mode: interrupt_pending stays pinned so
+  // that every emitted safepoint takes this path, making the servicing
+  // points a property of the compiled code rather than of wall-clock time.
+  interrupt();
+  if (bench_done())
+    {
+      program_over = 1;
+    }
+#else
   if (interrupt_pending)
     {
       interrupt_pending = 0;
       interrupt();
+      // The dispatcher observes the quit key between traces, which was every
+      // loop iteration back when a back-edge returned. Traces now close their
+      // own loops, so a spin loop need never come back -- the quit key has to
+      // be observed here too, or it would be ignored until the loop exits.
+      if (all_keys_down() & (1u << 31))
+        {
+          program_over = 1;
+        }
     }
+#endif
 }
 
 void errer()
@@ -194,9 +294,9 @@ void random_byte()
 
 void store_bcd()
 {
-  smc_pending = 1;
   op = OP_AT(program_counter);
   X;
+  note_store(addr, 3);
   uint8_t tmp = regs[x];
   uint8_t hundreds, tens;
 
@@ -241,8 +341,20 @@ void load_on_key()
 
   do
     {
+#ifdef BENCH
+      // Polling charges the virtual clock, so the synthetic keyboard always
+      // delivers eventually; bail out if the run is over regardless (--keys
+      // none never produces one).
+      all_keys = read_keys_io();
+      if (bench_done())
+        {
+          program_over = 1;
+          break;
+        }
+#else
       usleep(10);
       all_keys = read_keys_io();
+#endif
     } while((all_keys) == 0);
 
   for (int i = 0; i < 16; ++i)
@@ -279,19 +391,26 @@ void draw()
       sprite[i] = MEM_AT(addr+i);
     }
   FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
+#ifndef BENCH
+  // Frame sync: hold the draw until the 60 Hz tick rolls over. Skipped in
+  // bench mode -- there is no display to pace, and blocking on a clock that
+  // only advances with retired instructions would deadlock.
   while((current_tick = tick()) == last_tick)
     {
       usleep(NANOS_PER_TICK>>10);
     }
   last_tick = current_tick;
+#else
+  (void)current_tick;
+#endif
   refresh_io();
 }
 
 void save_registers()
 {
-  smc_pending = 1;
   op = OP_AT(program_counter);
   X;
+  note_store(addr, x + 1);
 
   for (int i = 0; i <= x; ++i)
     {
@@ -346,6 +465,9 @@ static const char *HOST_FNS[] = {
   "interrupt", "check_interrupt", "clearscreen_io", "retern", "call", "random_byte", "draw",
   "skip_key_x_down", "skip_key_x_up", "load_on_key", "store_bcd",
   "save_registers", "restore_registers",
+#ifdef BENCH
+  "sync_timers",
+#endif
 };
 #define N_HOST_FNS ((int)(sizeof(HOST_FNS)/sizeof(HOST_FNS[0])))
 
@@ -414,6 +536,10 @@ code codegen(void)
   gcc_jit_type *t_u16p = gcc_jit_type_get_pointer(t_u16);
   gcc_jit_type *t_int  = gcc_jit_context_get_type(ctx, GCC_JIT_TYPE_INT);
   gcc_jit_type *t_vintp = gcc_jit_type_get_pointer(gcc_jit_type_get_volatile(t_int));
+#ifdef BENCH
+  gcc_jit_type *t_i64  = gcc_jit_context_get_int_type(ctx, 8, 1);
+  gcc_jit_type *t_i64p = gcc_jit_type_get_pointer(t_i64);
+#endif
 
   // The trace itself: void ADDRxxxx(void).
   gcc_jit_function *function =
@@ -469,12 +595,81 @@ code codegen(void)
       blk = cont_blk; \
     } while (0)
 
+  // Close a back edge: branch to `dst`, a block already emitted in this trace,
+  // instead of returning to the dispatcher. Terminates blk.
+  //
+  // The dispatcher is where program_over (end of run, error, quit key) was
+  // observed, and a returning back-edge visited it once per loop iteration. A
+  // loop that stays inside the trace has to observe it itself, or a CHIP-8
+  // spin loop -- `JP self`, which every ROM ends with -- would never exit.
+  // The load is volatile so that it cannot be hoisted out of the loop the
+  // branch has just created; the safepoint above it is what makes the flag
+  // change in the first place.
+  #define CLOSE_BACKEDGE(dst) \
+    do { \
+      char xname[24]; \
+      snprintf(xname, sizeof(xname), "be_exit_%d", block_id); \
+      ++block_id; \
+      gcc_jit_block *exit_blk = gcc_jit_function_new_block(function, xname); \
+      gcc_jit_rvalue *over = gcc_jit_context_new_comparison(ctx, NULL, \
+        GCC_JIT_COMPARISON_NE, \
+        gcc_jit_lvalue_as_rvalue(mem(ctx, t_vintp, &program_over)), \
+        gcc_jit_context_new_rvalue_from_int(ctx, t_int, 0)); \
+      gcc_jit_block_end_with_conditional(blk, NULL, over, exit_blk, (dst)); \
+      gcc_jit_block_end_with_void_return(exit_blk, NULL); \
+    } while (0)
+
+  // Bench builds account for architectural CHIP-8 instructions so that the
+  // virtual clock matches the interpreter's. The count is of instructions the
+  // trace stands in for, not of emitted operations: a peephole that folds two
+  // opcodes into one native sequence still retires two.
+#ifdef BENCH
+  #define RETIRE_IN(b, n) \
+    gcc_jit_block_add_assignment_op((b), NULL, mem(ctx, t_i64p, &bench_retired), \
+      GCC_JIT_BINARY_OP_PLUS, gcc_jit_context_new_rvalue_from_int(ctx, t_i64, (n)))
+#else
+  #define RETIRE_IN(b, n) do { (void)(b); } while (0)
+#endif
+  #define RETIRE(n) RETIRE_IN(blk, (n))
+
   int local_id = 0;
   int block_id = 0;
+
+  // The block each CHIP-8 address was emitted into, for this trace only. A
+  // jump whose target is already in here is a back edge into code we have
+  // compiled, and can be closed as a branch; anything else still ends the
+  // trace. Straight-line blocks cost nothing -- both backends fold them away.
+  static gcc_jit_block *pc_block[MEMORY_SIZE];
+  memset(pc_block, 0, sizeof(pc_block));
 
   for (uint16_t pc = program_counter, op_count = 0; ; pc += 2, ++op_count)
     {
       op = OP_AT(pc);
+      mark_code(pc, 2);
+
+      if (pc_block[pc] != NULL)
+        {
+          // Fell through onto an address this trace already compiled. Close
+          // the loop rather than emit it twice; the safepoint keeps input and
+          // timers serviced once per iteration, exactly as the jump case does.
+          SAFEPOINT();
+          gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
+            gcc_jit_context_new_rvalue_from_int(ctx, t_u16, pc));
+          CLOSE_BACKEDGE(pc_block[pc]);
+          goto trace_terminated;
+        }
+
+      {
+        // One block per instruction, so that any address in the trace is a
+        // branch target.
+        char pname[24];
+        snprintf(pname, sizeof(pname), "pc_%04x_%d", pc, block_id);
+        ++block_id;
+        gcc_jit_block *pc_blk = gcc_jit_function_new_block(function, pname);
+        gcc_jit_block_end_with_jump(blk, NULL, pc_blk);
+        blk = pc_blk;
+        pc_block[pc] = pc_blk;
+      }
 
       // Periodic safepoint: bound the number of straight-line (or taken-skip)
       // instructions that can execute between input/timer checks.
@@ -482,6 +677,8 @@ code codegen(void)
         {
           SAFEPOINT();
         }
+
+      RETIRE(1);
 
       if (op == 0x00e0)
         { // clear screen
@@ -503,12 +700,22 @@ code codegen(void)
             SAFEPOINT();
             gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
               gcc_jit_context_new_rvalue_from_int(ctx, t_u16, immediate));
-            if ((pc != immediate) && (op_count < (1<<8)))
+            if (pc_block[immediate] != NULL)
+              {
+                // Back edge into this trace -- including the self-loop
+                // `JP self`. Branch to the block instead of returning: the
+                // whole loop now runs as one native loop, where it used to
+                // cost a dispatcher round trip (and, for a self-loop, a
+                // trace-cache lookup) on every single iteration.
+                CLOSE_BACKEDGE(pc_block[immediate]);
+                goto trace_terminated;
+              }
+            if (op_count < (1<<8))
               {
                 pc = immediate - 2; // continue the trace at the jump target
                 continue;
               }
-            goto end_of_trace; // self-loop or trace too long: bounce to dispatch
+            goto end_of_trace; // trace too long: bounce to dispatch
           }
         case 0x2:
           { // call
@@ -521,6 +728,19 @@ code codegen(void)
         case 0x9: // skip if Vx != Vy
           {
             char tname[24], ename[24];
+            // CHIP-8 has no conditional branch: every one is written as a skip
+            // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
+            // when the skip is not taken". Fuse the pair into a single
+            // conditional branch, sending the not-taken edge straight to NNN
+            // rather than stepping past the skip and bouncing to the dispatcher
+            // only to run a jump. The skipped opcode is read at compile time,
+            // which is what trace extension already assumes, so it is marked
+            // as code below: a ROM that writes over it raises smc_pending and
+            // the cache is discarded.
+            uint16_t fused_op = OP_AT((uint16_t)(pc + 2));
+            mark_code((uint16_t)(pc + 2), 2);
+            int fused = ((fused_op & 0xf000) == 0x1000);
+            uint16_t fused_target = fused_op & 0x0fff;
             snprintf(tname, sizeof(tname), "skip_%d", block_id);
             snprintf(ename, sizeof(ename), "noskip_%d", block_id);
             ++block_id;
@@ -550,10 +770,35 @@ code codegen(void)
             }
             gcc_jit_block_end_with_conditional(blk, NULL, cond, then_blk, else_blk);
 
-            // "don't skip": advance one instruction and bounce to dispatch.
-            gcc_jit_block_add_assignment_op(else_blk, NULL,
-              mem(ctx, t_u16p, &program_counter), GCC_JIT_BINARY_OP_PLUS, two16);
-            gcc_jit_block_end_with_void_return(else_blk, NULL);
+            if (fused)
+              {
+                // "don't skip" with the jump folded in: land on NNN directly.
+                // These edges are usually loop back-edges, so they keep the
+                // safepoint the jump itself would have emitted.
+                blk = else_blk;
+                RETIRE(1); // the folded 1NNN still retires
+                SAFEPOINT();
+                gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
+                  gcc_jit_context_new_rvalue_from_int(ctx, t_u16, fused_target));
+                if (pc_block[fused_target] != NULL)
+                  {
+                    // The fused edge is a loop back-edge, which is what this
+                    // shape almost always is: `skip ; JP top` is how CHIP-8
+                    // spells "loop while". Close it.
+                    CLOSE_BACKEDGE(pc_block[fused_target]);
+                  }
+                else
+                  {
+                    gcc_jit_block_end_with_void_return(blk, NULL);
+                  }
+              }
+            else
+              {
+                // "don't skip": advance one instruction and bounce to dispatch.
+                gcc_jit_block_add_assignment_op(else_blk, NULL,
+                  mem(ctx, t_u16p, &program_counter), GCC_JIT_BINARY_OP_PLUS, two16);
+                gcc_jit_block_end_with_void_return(else_blk, NULL);
+              }
 
             // "skip": advance two instructions and keep compiling inline.
             blk = then_blk;
@@ -717,6 +962,9 @@ code codegen(void)
               case 0x07:
                 { // Vx = delay_timer
                   X;
+#ifdef BENCH
+                  CALL_HOST("sync_timers"); // read/write the timer at the current clock
+#endif
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &regs[x]),
                     gcc_jit_lvalue_as_rvalue(mem(ctx, t_u8p, &delay_timer)));
                   STEP_AND_CONTINUE;
@@ -729,6 +977,9 @@ code codegen(void)
               case 0x15:
                 { // delay_timer = Vx
                   X;
+#ifdef BENCH
+                  CALL_HOST("sync_timers"); // read/write the timer at the current clock
+#endif
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &delay_timer),
                     gcc_jit_lvalue_as_rvalue(mem(ctx, t_u8p, &regs[x])));
                   STEP_AND_CONTINUE;
@@ -736,6 +987,9 @@ code codegen(void)
               case 0x18:
                 { // sound_timer = Vx
                   X;
+#ifdef BENCH
+                  CALL_HOST("sync_timers"); // read/write the timer at the current clock
+#endif
                   gcc_jit_block_add_assignment(blk, NULL, mem(ctx, t_u8p, &sound_timer),
                     gcc_jit_lvalue_as_rvalue(mem(ctx, t_u8p, &regs[x])));
                   STEP_AND_CONTINUE;
@@ -779,6 +1033,7 @@ code codegen(void)
 
  end_of_trace:
   gcc_jit_block_end_with_void_return(blk, NULL);
+ trace_terminated: // blk was already terminated by a closed back edge
 
   { const char *e = gcc_jit_context_get_first_error(ctx);
     if (e) fprintf(stderr, "JITERR @ %s: %s\n", fn_name, e); }
@@ -800,10 +1055,13 @@ code codegen(void)
   return fn;
 
   #undef SAFEPOINT
+  #undef CLOSE_BACKEDGE
   #undef PC_LVAL
   #undef STEP_AND_CONTINUE
   #undef CALL_HOST
   #undef BAIL_ERRER
+  #undef RETIRE
+  #undef RETIRE_IN
 }
 
 // ------------------------------------------------------------------------
@@ -814,18 +1072,27 @@ int main(int argc, const char * argv[])
 {
   FILE * fp;
   int trace_count = 0;
+  const char *rom;
 
+#ifdef BENCH
+  if (bench_parse_args(argc, argv, &rom) != 0)
+    {
+      exit(-1);
+    }
+#else
   if (argc <= 1)
     {
       fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
       exit(-1);
     }
+  rom = argv[1];
+#endif
 
   // Load program
-  fp = fopen(argv[1], "rb");
+  fp = fopen(rom, "rb");
   if (fp == NULL)
     {
-      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      fprintf(stderr, "Could not open ROM %s\n", rom);
       exit(-1);
     }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
@@ -855,6 +1122,9 @@ int main(int argc, const char * argv[])
               break;
             }
           trace_cache[program_counter] = compiled;
+#ifdef BENCH
+          ++bench_compiled;
+#endif
           continue;
         }
       c();
@@ -872,7 +1142,12 @@ int main(int argc, const char * argv[])
           n_trace_results = 0;
           cap_trace_results = 0;
           memset(trace_cache, 0, sizeof(trace_cache));
+          // No trace survives, so nothing is code until it is compiled again.
+          memset(code_bytes, 0, sizeof(code_bytes));
           smc_pending = 0;
+#ifdef BENCH
+          ++bench_flushes;
+#endif
         }
 
       if ((all_keys_down() & (1<<31)) || program_over)
@@ -886,7 +1161,11 @@ int main(int argc, const char * argv[])
   deinit_io();
   deinit_chip8();
 
+#ifdef BENCH
+  bench_report("libgccjit", "traces", trace_count);
+#else
   dump_chip8_state("traces", trace_count);
+#endif
 
   teardown_jit();
 

@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "chip8.h"
+#include "bench.h"
 #include "io.h"
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
@@ -91,6 +92,22 @@
   builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); \
   continue;
 #define JIT_RETURN builder->CreateRet(nullptr);
+// Bench builds account for architectural CHIP-8 instructions so the virtual
+// clock matches the interpreter's. The count is of instructions the trace
+// stands in for, not of emitted operations: a peephole that folds two opcodes
+// into one native sequence still retires two.
+#ifdef BENCH
+#define JIT_RETIRE(n) \
+  { \
+    auto i64ty_r = llvm::Type::getInt64Ty(*context); \
+    auto loc_r = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(void *)*8, reinterpret_cast<uint64_t>(&bench_retired), false)); \
+    auto ptr_r = builder->CreateIntToPtr(loc_r, llvm::PointerType::getUnqual(*context)); \
+    auto val_r = builder->CreateLoad(i64ty_r, ptr_r); \
+    builder->CreateStore(builder->CreateAdd(val_r, llvm::ConstantInt::get(i64ty_r, (n))), ptr_r); \
+  }
+#else
+#define JIT_RETIRE(n) {}
+#endif
 #define JIT_DONE goto end_of_trace;
 
 // Emit a lightweight safepoint: a volatile load of interrupt_pending and a
@@ -114,6 +131,28 @@
     builder->SetInsertPoint(basic_block); \
   }
 
+// Close a back edge: branch to `dst`, a block already emitted in this trace,
+// instead of returning to the dispatcher. Terminates the current block.
+//
+// The dispatcher is where program_over (end of run, error, quit key) was
+// observed, and a returning back-edge visited it once per loop iteration. A
+// loop that stays inside the trace has to observe it itself, or a CHIP-8 spin
+// loop -- `JP self`, which every ROM ends with -- would never exit. The load
+// is volatile so it cannot be hoisted out of the loop the branch has just
+// created; the safepoint above it is what makes the flag change at all.
+#define JIT_CLOSE_BACKEDGE(dst) \
+  { \
+    auto i8ty_be = llvm::Type::getInt8Ty(*context); \
+    auto over_loc = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(void *)*8, reinterpret_cast<uint64_t>(&program_over), false)); \
+    auto over_ptr = builder->CreateIntToPtr(over_loc, llvm::PointerType::getUnqual(*context)); \
+    auto over_val = builder->CreateLoad(i8ty_be, over_ptr, true /* volatile */); \
+    auto over = builder->CreateICmpNE(over_val, llvm::ConstantInt::get(i8ty_be, 0)); \
+    auto exit_block = llvm::BasicBlock::Create(*context, "", function); \
+    builder->CreateCondBr(over, exit_block, (dst)); \
+    builder->SetInsertPoint(exit_block); \
+    JIT_RETURN; \
+  }
+
 // ------------------------------------------------------------------------
 
 int last_tick = 0;
@@ -125,6 +164,40 @@ int interrupt_count = 0;
 bool program_over = false;
 volatile sig_atomic_t smc_pending = 0;
 
+// Bytes the compiler has read while building a trace still in the cache.
+//
+// RAM and code share one 4 KiB address space, so any Fx33/Fx55 store *could*
+// be self-modifying -- but on real ROMs it almost never is. The common pattern
+// is BCD-ing a score into a scratch buffer, or spilling registers, several
+// times a second; treating those as code writes discarded every compiled trace
+// and made the JIT recompile the program from scratch at frame rate. Recording
+// which bytes codegen actually depended on lets a store be recognized as
+// harmless, and reduces the whole-cache flush to the rare case of a ROM that
+// really does rewrite its own instructions.
+static uint8_t code_bytes[MEMORY_SIZE];
+
+// Called for every byte codegen reads: the opcode stream itself, and anything
+// a peephole folds in (the skip+jump fusion reads the instruction after the
+// skip). Anything the compiler baked into native code must be covered here, or
+// a write over it will go unnoticed.
+static void mark_code(uint16_t a, unsigned n)
+{
+  for (unsigned i = 0; i < n; ++i)
+    code_bytes[(a + i) & (MEMORY_SIZE - 1)] = 1;
+}
+
+// Raise smc_pending only if [a, a+n) overlaps a byte some live trace was
+// compiled from.
+static void note_store(uint16_t a, unsigned n)
+{
+  for (unsigned i = 0; i < n; ++i)
+    if (code_bytes[(a + i) & (MEMORY_SIZE - 1)])
+      {
+        smc_pending = 1;
+        return;
+      }
+}
+
 // Asynchronous interrupt source. A POSIX interval timer raises SIGALRM
 // INPUT_TICKS times per 60 Hz tick; the handler only sets this flag (ncurses
 // is not async-signal-safe, so the actual polling happens synchronously in
@@ -132,6 +205,9 @@ volatile sig_atomic_t smc_pending = 0;
 volatile sig_atomic_t interrupt_pending = 0;
 static_assert(sizeof(sig_atomic_t) == sizeof(int32_t),
               "JIT_SAFEPOINT emits a 32-bit load of interrupt_pending");
+static_assert(sizeof(program_over) == 1,
+              "JIT_CLOSE_BACKEDGE emits an 8-bit load of program_over");
+#ifndef BENCH
 static timer_t interrupt_timer;
 
 static void alarm_handler(int signum)
@@ -139,9 +215,14 @@ static void alarm_handler(int signum)
   (void)signum;
   interrupt_pending = 1;
 }
+#endif
 
 static void init_interrupt_timer()
 {
+#ifdef BENCH
+  interrupt_pending = 1; // pinned; see check_interrupt()
+  return;
+#else
   struct sigaction sa;
   struct sigevent sev;
   struct itimerspec its;
@@ -161,11 +242,14 @@ static void init_interrupt_timer()
   its.it_interval.tv_nsec = NANOS_PER_TICK / INPUT_TICKS;
   its.it_value = its.it_interval;
   timer_settime(interrupt_timer, 0, &its, NULL);
+#endif
 }
 
 static void deinit_interrupt_timer()
 {
+#ifndef BENCH
   timer_delete(interrupt_timer);
+#endif
 }
 
 typedef void (*code)(void);  // function pointer typedef
@@ -179,14 +263,21 @@ extern "C"
 {
   void clear_key(uint8_t key)
   {
+#ifdef BENCH
+    bench_clear_key(key);
+#else
     for (int i = 0; i < INPUT_TICKS; ++i)
       {
         keys_down[i] &= ~(1u << key);
       }
+#endif
   }
 
   uint32_t all_keys_down()
   {
+#ifdef BENCH
+    return bench_keys_now();
+#else
     uint32_t all_keys = 0;
 
     for (int i = 0; i < INPUT_TICKS; ++i)
@@ -194,18 +285,45 @@ extern "C"
         all_keys |= keys_down[i];
       }
     return all_keys;
+#endif
   }
 
   int tick()
   {
+#ifdef BENCH
+    return bench_tick();
+#else
     struct timespec spec;
 
     clock_gettime(CLOCK_MONOTONIC, &spec);
     return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
+#endif
   }
+
+#ifdef BENCH
+  // Catch the 60 Hz timers up to the virtual clock. Called wherever a timer
+  // is read or written, so the value observed depends only on how many
+  // instructions have retired -- not on how often this engine happens to
+  // service interrupts, which differs between the interpreter and the JITs.
+  void sync_timers()
+  {
+    int now = tick();
+    int elapsed = now - last_tick;
+
+    if (elapsed > 0)
+      {
+        delay_timer = (delay_timer > elapsed) ? (uint8_t)(delay_timer - elapsed) : 0;
+        sound_timer = (sound_timer > elapsed) ? (uint8_t)(sound_timer - elapsed) : 0;
+        last_tick = now;
+      }
+  }
+#endif
 
   void interrupt()
   {
+#ifdef BENCH
+    sync_timers(); // keys are polled on demand, not ringed
+#else
     int current_tick = tick();
 
     if (current_tick != last_tick)
@@ -222,6 +340,7 @@ extern "C"
       }
     keys_down[interrupt_count] = read_keys_io();
     interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
+#endif
   }
 
   // Slow path of a safepoint: service timers and input iff the asynchronous
@@ -229,11 +348,30 @@ extern "C"
   // dispatch loop and from any host helper.
   void check_interrupt()
   {
+#ifdef BENCH
+    // No asynchronous timer in bench mode: interrupt_pending stays pinned so
+    // that every emitted safepoint takes this path, making the servicing
+    // points a property of the compiled code rather than of wall-clock time.
+    interrupt();
+    if (bench_done())
+      {
+        program_over = true;
+      }
+#else
     if (interrupt_pending)
       {
         interrupt_pending = 0;
         interrupt();
+        // The dispatcher observes the quit key between traces, which was every
+        // loop iteration back when a back-edge returned. Traces now close their
+        // own loops, so a spin loop need never come back -- the quit key has to
+        // be observed here too, or it would be ignored until the loop exits.
+        if (all_keys_down() & (1u << 31))
+          {
+            program_over = true;
+          }
       }
+#endif
   }
 
   void errer()
@@ -279,9 +417,9 @@ extern "C"
 
   void store_bcd()
   {
-    smc_pending = 1;
     OP;
     X;
+    note_store(addr, 3);
     uint8_t tmp = regs[x];
     uint8_t hundreds, tens;
 
@@ -326,8 +464,20 @@ extern "C"
 
     do
       {
+#ifdef BENCH
+        // Polling charges the virtual clock, so the synthetic keyboard always
+        // delivers eventually; bail out if the run is over regardless
+        // (--keys none never produces one).
+        all_keys = read_keys_io();
+        if (bench_done())
+          {
+            program_over = true;
+            break;
+          }
+#else
         usleep(10);
         all_keys = read_keys_io();
+#endif
       } while((all_keys) == 0);
 
     for (int i = 0; i < 16; ++i)
@@ -364,19 +514,26 @@ extern "C"
         sprite[i] = MEM_AT(addr+i);
       }
     FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
+#ifndef BENCH
+    // Frame sync: hold the draw until the 60 Hz tick rolls over. Skipped in
+    // bench mode -- there is no display to pace, and blocking on a clock that
+    // only advances with retired instructions would deadlock.
     while((current_tick = tick()) == last_tick)
       {
         usleep(NANOS_PER_TICK>>10);
       }
     last_tick = current_tick;
+#else
+    (void)current_tick;
+#endif
     refresh_io();
   }
 
   void save_registers()
   {
-    smc_pending = 1;
     OP;
     X;
+    note_store(addr, x + 1);
 
     for (int i = 0; i <= x; ++i)
       {
@@ -443,9 +600,38 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   llvm::BasicBlock * basic_block = llvm::BasicBlock::Create(*context, "", function);
   builder->SetInsertPoint(basic_block);
 
+  // The block each CHIP-8 address was emitted into, for this trace only. A
+  // jump whose target is already in here is a back edge into code we have
+  // compiled, and can be closed as a branch; anything else still ends the
+  // trace. Straight-line blocks cost nothing -- both backends fold them away.
+  std::vector<llvm::BasicBlock *> pc_block(MEMORY_SIZE, nullptr);
+
   for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
   {
     op = OPCODE_AT(pc);
+    mark_code(pc, 2);
+
+    if (pc_block[pc] != nullptr)
+      {
+        // Fell through onto an address this trace already compiled. Close the
+        // loop rather than emit it twice; the safepoint keeps input and timers
+        // serviced once per iteration, exactly as the jump case does.
+        JIT_SAFEPOINT;
+        JIT_GETPTR16(program_counter);
+        builder->CreateStore(builder->getInt16(pc), JIT_PTR(program_counter));
+        JIT_CLOSE_BACKEDGE(pc_block[pc]);
+        goto trace_terminated;
+      }
+
+    {
+      // One block per instruction, so that any address in the trace is a
+      // branch target.
+      auto pc_blk = llvm::BasicBlock::Create(*context, "", function);
+      builder->CreateBr(pc_blk);
+      basic_block = pc_blk;
+      builder->SetInsertPoint(basic_block);
+      pc_block[pc] = pc_blk;
+    }
 
     // Periodic safepoint: bound the number of straight-line (or taken-skip)
     // instructions that can execute between input/timer checks.
@@ -453,6 +639,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
       {
         JIT_SAFEPOINT;
       }
+
+    JIT_RETIRE(1);
 
     if (op == 0x00e0)
       { // clear
@@ -474,7 +662,17 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           JIT_SAFEPOINT;
           JIT_GETPTR16(program_counter);
           builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(program_counter));
-          if ((pc != immediate) && (op_count < (1<<8)))
+          if (pc_block[immediate] != nullptr)
+            {
+              // Back edge into this trace -- including the self-loop
+              // `JP self`. Branch to the block instead of returning: the whole
+              // loop now runs as one native loop, where it used to cost a
+              // dispatcher round trip (and, for a self-loop, a trace-cache
+              // lookup) on every single iteration.
+              JIT_CLOSE_BACKEDGE(pc_block[immediate]);
+              goto trace_terminated;
+            }
+          if (op_count < (1<<8))
             {
               pc = immediate-2;
               continue;
@@ -498,6 +696,20 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
           auto four = builder->getInt16(4);
           JIT_GETPTR16(program_counter);
           JIT_LOAD16(program_counter);
+
+          // CHIP-8 has no conditional branch: every one is written as a skip
+          // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
+          // when the skip is not taken". Fuse the pair into a single
+          // conditional branch, sending the not-taken edge straight to NNN
+          // rather than stepping past the skip and bouncing to the dispatcher
+          // only to run a jump. The skipped opcode is read at compile time,
+          // which is what trace extension already assumes, so it is marked as
+          // code below: a ROM that writes over it raises smc_pending and the
+          // cache is discarded.
+          uint16_t fused_op = OPCODE_AT((uint16_t)(pc + 2));
+          mark_code((uint16_t)(pc + 2), 2);
+          bool fused = ((fused_op & 0xf000) == 0x1000);
+          uint16_t fused_target = fused_op & 0x0fff;
 
           // Generate comparison
           auto then_block = llvm::BasicBlock::Create(*context, "", function);
@@ -538,9 +750,34 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
 
           // "else" (don't skip) block
           builder->SetInsertPoint(else_block);
-          auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two);
-          builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); // set VM pc
-          JIT_RETURN; // return control
+          if (fused)
+            {
+              // The jump is folded in: land on NNN directly. These edges are
+              // usually loop back-edges, so they keep the safepoint the jump
+              // itself would have emitted.
+              basic_block = else_block;
+              JIT_RETIRE(1); // the folded 1NNN still retires
+              JIT_SAFEPOINT;
+              builder->CreateStore(builder->getInt16(fused_target),
+                                   JIT_PTR(program_counter)); // set VM pc
+              if (pc_block[fused_target] != nullptr)
+                {
+                  // The fused edge is a loop back-edge, which is what this
+                  // shape almost always is: `skip ; JP top` is how CHIP-8
+                  // spells "loop while". Close it.
+                  JIT_CLOSE_BACKEDGE(pc_block[fused_target]);
+                }
+              else
+                {
+                  JIT_RETURN; // return control
+                }
+            }
+          else
+            {
+              auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two);
+              builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); // set VM pc
+              JIT_RETURN; // return control
+            }
 
           // "then" (do skip) block
           basic_block = then_block;
@@ -726,6 +963,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             case 0x07:
               { // get_delay_timer
                 X; JIT_GETPTRREG(x);
+#ifdef BENCH
+                { JIT_CALL("sync_timers"); } // access the timer at the current clock
+#endif
                 auto JIT_LOC(delay_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&delay_timer), false));
                 auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::PointerType::getUnqual(*context));
                 auto JIT_VALUE(delay_timer) = builder->CreateLoad(llvm::Type::getInt8Ty(*context), JIT_PTR(delay_timer));
@@ -740,6 +980,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             case 0x15:
               { // set_delay_timer
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
+#ifdef BENCH
+                { JIT_CALL("sync_timers"); } // access the timer at the current clock
+#endif
                 auto JIT_LOC(delay_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&delay_timer), false));
                 auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::PointerType::getUnqual(*context));
                 builder->CreateStore(JIT_VALUE(x), JIT_PTR(delay_timer));
@@ -748,6 +991,9 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             case 0x18:
               { // set_sound_timer
                 X; JIT_GETPTRREG(x); JIT_LOADREG(x);
+#ifdef BENCH
+                { JIT_CALL("sync_timers"); } // access the timer at the current clock
+#endif
                 auto JIT_LOC(sound_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&sound_timer), false));
                 auto JIT_PTR(sound_timer) = builder->CreateIntToPtr(JIT_LOC(sound_timer), llvm::PointerType::getUnqual(*context));
                 builder->CreateStore(JIT_VALUE(x), JIT_PTR(sound_timer));
@@ -802,9 +1048,10 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   }
 
  end_of_trace:
+  JIT_RETURN;
+ trace_terminated: // the current block was already terminated by a closed back edge
 
   // Generate code
-  JIT_RETURN;
   MPM.run(*module, MAM);
   auto safe_module = llvm::orc::ThreadSafeModule(std::move(module), std::move(context));
   auto RT = JIT->getMainJITDylib().createResourceTracker();
@@ -827,7 +1074,12 @@ void invalidate_traces()
   trace_resources.clear();
   if (trace_cache)
     trace_cache->clear();
+  // No trace survives, so nothing is code until it is compiled again.
+  memset(code_bytes, 0, sizeof(code_bytes));
   smc_pending = 0;
+#ifdef BENCH
+  ++bench_flushes;
+#endif
 }
 
 void teardown_jit(std::unique_ptr<llvm::orc::LLJIT> & JIT)
@@ -851,18 +1103,27 @@ int main(int argc, const char * argv[])
 {
   FILE * fp;
   int trace_count = 0;
+  const char *rom;
 
+#ifdef BENCH
+  if (bench_parse_args(argc, argv, &rom) != 0)
+    {
+      exit(-1);
+    }
+#else
   if (argc <= 1)
     {
       fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
       exit(-1);
     }
+  rom = argv[1];
+#endif
 
   // Load program
-  fp = fopen(argv[1], "rb");
+  fp = fopen(rom, "rb");
   if (fp == NULL)
     {
-      fprintf(stderr, "Could not open ROM %s\n", argv[1]);
+      fprintf(stderr, "Could not open ROM %s\n", rom);
       exit(-1);
     }
   if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
@@ -905,6 +1166,9 @@ int main(int argc, const char * argv[])
               break;
             }
           trace_cache->operator[](program_counter) = compiled;
+#ifdef BENCH
+          ++bench_compiled;
+#endif
           continue;
         }
       // Otherwise run the code that has been found
@@ -933,7 +1197,11 @@ int main(int argc, const char * argv[])
   deinit_io();
   deinit_chip8();
 
+#ifdef BENCH
+  bench_report("llvm", "traces", trace_count);
+#else
   dump_chip8_state("traces", trace_count);
+#endif
 
   teardown_jit(TheJIT);
 

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 #include "chip8.h"
+#include "bench.h"
 
 uint16_t stack[STACK_SIZE];
 uint8_t __attribute__((aligned(0x1000))) memory[MEMORY_SIZE] = {
@@ -31,7 +32,11 @@ uint16_t program_counter = 0;
 
 void init_chip8()
 {
+#ifdef BENCH
+  srand(bench_seed); // reproducible Cxkk across runs and across engines
+#else
   srand(time(NULL));
+#endif
 }
 
 void deinit_chip8()
