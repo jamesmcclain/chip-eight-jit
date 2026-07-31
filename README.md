@@ -1,8 +1,6 @@
 # CHIP-8
 
-A small CHIP-8 emulator with several interchangeable execution backends and a
-disassembler. The VM state and terminal I/O are shared; each backend executes
-the loaded ROM a different way.
+A small CHIP-8 emulator. It has several interchangeable execution backends and a disassembler. The VM state and terminal I/O are shared. Each backend executes the loaded ROM in a different way.
 
 ## Backends
 
@@ -14,52 +12,25 @@ the loaded ROM a different way.
 | `chip8-disas`     | Static disassembler.                 |
 | `chip8-asm`       | Two-pass CHIP-8 assembler.           |
 
-Both JITs compile one native function per entry PC, cache it, and extend traces
-across unconditional jumps and the taken side of skips; awkward opcodes (control
-flow, I/O, blocking input) are emitted as calls to shared C helper routines.
+Both JITs compile one native function per entry PC. The JIT caches the function. The JIT extends traces across unconditional jumps and the taken side of skips. Awkward opcodes call shared C helper routines. These opcodes include control flow, I/O, and blocking input.
 
-A jump whose target is an address the trace has already compiled is closed as a
-branch to that code rather than a return, so a CHIP-8 loop runs as a native
-loop instead of costing a dispatcher round trip and a trace-cache lookup per
-iteration. Because a trace can then loop indefinitely without returning, each
-closed back-edge carries a safepoint and a test of `program_over`, which is
-where the end of the run, an error, and the quit key are all observed.
+A jump to an already compiled address closes as a branch to that code. A CHIP-8 loop runs as a native loop. The loop does not cost a dispatcher round trip or a trace-cache lookup per iteration. Each closed back-edge carries a safepoint. The safepoint tests `program_over`. The safepoint detects the end of the run, an error, and the quit key.
 
-Because CHIP-8 keeps code and data in one 4 KiB address space, the stores
-(`Fx33`, `Fx55`) may be self-modifying, and a trace compiled from overwritten
-bytes would be stale. Each backend records the bytes codegen read while
-building the traces currently in its cache, and a store raises the
-invalidation flag only if it lands on one of them; the next trip through the
-dispatcher then discards the cache. Most ROMs store a BCD score or spill
-registers to a scratch buffer several times a second and never touch code, so
-this is the difference between recompiling the program at frame rate and not
-recompiling it at all.
+CHIP-8 keeps code and data in one 4 KiB address space. The stores (`Fx33`, `Fx55`) can modify their own code. A trace compiled from overwritten bytes is stale. Each backend records the bytes the code generator read. A store raises the invalidation flag only if it lands on one of those bytes. The dispatcher then discards the cache on the next trip. Most ROMs store a BCD score or spill registers to a scratch buffer. They never touch code. The difference is recompiling at frame rate or not recompiling at all.
 
-Timers and input in the JIT backends are driven asynchronously: a POSIX
-interval timer raises `SIGALRM` several hundred times a second and its handler
-sets a flag; compiled traces contain lightweight safepoints (a volatile load
-plus a conditional call) at jump back-edges and every 32 straight-line
-instructions, which service the flag by polling the keyboard and decrementing
-the 60 Hz timers. This bounds input latency regardless of the shape of the
-compiled code.
+Timers and input run asynchronously in the JIT backends. A POSIX interval timer raises `SIGALRM` several hundred times a second. Its handler sets a flag. Compiled traces contain lightweight safepoints at jump back-edges and every 32 straight-line instructions. The safepoint is a volatile load plus a conditional call. These safepoints poll the keyboard and decrement the 60 Hz timers. This design bounds input latency.
 
 ## Build
 
-Requirements: `gcc`/`g++`, LLVM 20 development files (`llvm-config-20`),
-libgccjit (`libgccjit-*-dev`), and ncurses.
+Install `gcc`/`g++`, LLVM 20 development files (`llvm-config-20`), libgccjit (`libgccjit-*-dev`), and ncurses.
 
-The libgccjit dev package installs its header (`libgccjit.h`) and link stub
-(`libgccjit.so`) under a GCC-version-specific directory such as
-`/usr/lib/gcc/x86_64-linux-gnu/14/`, which is **not** on the compiler's default
-search path. The Makefile does not add it automatically, so on Debian/Ubuntu you
-must point `CPPFLAGS` and `LDFLAGS` at that directory. The one-liner to properly invoke `make -C src` (with libgccjit flags, including cleanest) is:
+The libgccjit dev package installs its header and link stub under a GCC-version-specific directory. This directory is not on the compiler's default search path. The Makefile does not add it. You must point `CPPFLAGS` and `LDFLAGS` at that directory on Debian/Ubuntu. Use this command to invoke `make -C src`:
 
 ```sh
 gccjit_dir=$(dirname $(find /usr/lib/gcc -name libgccjit.so 2>/dev/null | head -1)); CPPFLAGS="-I$gccjit_dir/include" LDFLAGS="-L$gccjit_dir" make -C src
 ```
 
-If you only need the interpreter, LLVM, disassembler, or assembler target, the
-libgccjit path is not required and a plain `make chip8-interp` (etc.) will work without it.
+You do not need libgccjit for the interpreter, LLVM, disassembler, or assembler. A plain `make chip8-interp` will work.
 
 ```sh
 cd src
@@ -68,7 +39,7 @@ make chip8-interp    # or build a single target
 make chip8-asm
 ```
 
-Override the LLVM config binary if needed, e.g. `make LLVM_CONFIG=llvm-config`.
+Override the LLVM config binary if needed. For example, use `make LLVM_CONFIG=llvm-config`.
 
 ## Usage
 
@@ -78,23 +49,13 @@ Override the LLVM config binary if needed, e.g. `make LLVM_CONFIG=llvm-config`.
 ./chip8-libgccjit path/to/rom.ch8
 ```
 
-The display is rendered with ncurses (64x32). The 16 CHIP-8 keys are mapped to
-the hex keys `0`-`9` and `a`-`f`; press `q` or `Escape` to quit. On exit the
-register file, program counter, address register, and timers are dumped to
-stderr.
+The emulator renders the display with ncurses (64x32). The 16 CHIP-8 keys map to `0`-`9` and `a`-`f`. Press `q` or `Escape` to quit. On exit the emulator writes the register file, program counter, address register, and timers to stderr.
 
 ## Benchmarking and differential testing
 
-An ordinary run is not reproducible: the RNG is seeded from the clock, the
-60 Hz timers follow `CLOCK_MONOTONIC` (and, in the JITs, a `SIGALRM` interval
-timer), input arrives when the terminal delivers it, and no ROM terminates. So
-two runs never agree, and neither timings nor final state can be compared.
+An ordinary run is not reproducible. The RNG uses the clock as seed. The 60 Hz timers follow `CLOCK_MONOTONIC`. The JITs use a `SIGALRM` interval timer. Input arrives when the terminal delivers it. No ROM terminates. Two runs never agree. You cannot compare timings or final state.
 
-`make bench` builds a second copy of each engine with `-DBENCH`, which replaces
-every one of those inputs with something reproducible: a fixed seed, a virtual
-60 Hz clock driven by retired instructions, a synthetic keyboard derived from
-that clock, headless I/O with the same framebuffer and collision semantics, and
-a stop after a set number of instructions.
+`make bench` builds a second copy of each engine with `-DBENCH`. This flag replaces every input with a reproducible value. It uses a fixed seed, a virtual 60 Hz clock driven by retired instructions, a synthetic keyboard derived from that clock, and headless I/O. The same framebuffer and collision semantics apply. The engine stops after a set number of instructions.
 
 ```sh
 make -C src bench            # needs the libgccjit flags above
@@ -102,10 +63,7 @@ make -C src bench            # needs the libgccjit flags above
 ./src/chip8-llvm-bench roms/PONG --instructions 5000000 --seed 7 --keys none
 ```
 
-The report on stderr adds the machine state to `retired` (architectural CHIP-8
-instructions), `compiled` and `flushes` (JIT compile pressure and how often
-self-modifying writes discarded the trace cache), a `display` hash of the
-framebuffer, elapsed time, and a `rate` in retired instructions per second.
+The stderr report adds `retired` (architectural CHIP-8 instructions). It adds `compiled` and `flushes` (JIT compile pressure and self-modifying write discards). It adds a `display` hash of the framebuffer. It adds elapsed time and a `rate` in retired instructions per second.
 
 `scripts/bench_diff.py` runs the engines against each other:
 
@@ -114,45 +72,22 @@ python3 scripts/bench_diff.py --instructions 1000000          # all stock ROMs
 python3 scripts/bench_diff.py --engines llvm roms/BLINKY
 ```
 
-A JIT cannot stop on an exact instruction count -- a trace only notices the
-budget at a safepoint -- so the script reads each JIT's actual retired count
-and re-runs the interpreter to precisely that point. Both engines have then
-executed the same instruction sequence from the same state, and every
-register, timer, the PC, and the display hash must agree exactly; anything
-else is a real divergence.
+A JIT can not stop on an exact instruction count. A trace notices the budget only at a safepoint. The script reads each JIT's actual retired count. It re-runs the interpreter to that exact count. Both engines execute the same instruction sequence from the same state. Every register, timer, PC, and display hash must agree exactly. Any difference is a real divergence.
 
-Two properties are worth preserving when touching a JIT. Timer values must
-stay a function of the virtual clock alone rather than of how often an engine
-services interrupts, which is why every timer access calls `sync_timers()`.
-And `bench_retired` counts *architectural* instructions, not emitted
-operations: a peephole that folds several opcodes into one native sequence
-must still account for all of them, or its virtual clock drifts away from the
-interpreter's and the comparison stops meaning anything.
+Preserve two properties when you change a JIT. Timer values must depend only on the virtual clock. Every timer access calls `sync_timers()` because of this requirement. `bench_retired` counts architectural instructions, not emitted operations. A peephole that folds several opcodes into one native sequence must count all of them. The virtual clock stays aligned with the interpreter.
 
 ## Assembling ROMs
 
-`chip8-asm` reads source from a file and writes the raw ROM payload to standard
-output. ROM addresses start at `0x200`; the output contains bytes from that
-address onward.
+`chip8-asm` reads source from a file. It writes the raw ROM payload to standard output. ROM addresses start at `0x200`. The output contains bytes from that address onward.
 
 ```sh
 ./chip8-asm program.asm > program.ch8
 ./chip8-interp program.ch8
 ```
 
-The assembler accepts case-insensitive conventional CHIP-8 mnemonics:
-`CLS`, `RET`, `JP`, `CALL`, `SE`, `SNE`, `LD`, `ADD`, `OR`, `AND`, `XOR`,
-`SUB`, `SHR`, `SUBN`, `SHL`, `RND`, `DRW`, `SKP`, and `SKNP`. `SHR` and `SHL`
-may include an optional second register operand to preserve its encoded `y`
-nibble when round-tripping a ROM. Registers are
-written `V0` through `VF`; numeric literals use decimal or C-style prefixes
-such as `0xFF`. `LD` supports the standard special operands `I`, `DT`, `ST`,
-`K`, `F`, `B`, and `[I]` (for example, `LD B, V3` and `LD V3, [I]`).
+The assembler accepts these case-insensitive CHIP-8 mnemonics: `CLS`, `RET`, `JP`, `CALL`, `SE`, `SNE`, `LD`, `ADD`, `OR`, `AND`. It also accepts `XOR`, `SUB`, `SHR`, `SUBN`, `SHL`, `RND`, `DRW`, `SKP`, `SKNP`. `SHR` and `SHL` can include an optional second register operand. This operand preserves the encoded `y` nibble when you round-trip a ROM. Write registers as `V0` through `VF`. Numeric literals use decimal or C-style prefixes such as `0xFF`. `LD` supports the standard special operands `I`, `DT`, `ST`, `K`, `F`, `B`, and `[I]`. For example: `LD B, V3` and `LD V3, [I]`.
 
-Labels end with `:` and may be used before or after their definition. `;` and
-`#` start comments. The data directives are `.byte`, `.word` (big-endian), and
-`.org`; `.org` can move forward within `0x200` through `0xFFF` and fills the
-intervening output with zeroes. Example:
+Labels end with `:`. You can use a label before or after its definition. `;` and `#` start comments. The data directives are `.byte`, `.word` (big-endian), and `.org`. `.org` moves forward within `0x200` through `0xFFF`. It fills the intervening output with zeroes. Example:
 
 ```asm
 ; clear, then spin forever
@@ -166,9 +101,7 @@ loop:
 sprite: .byte 0xF0, 0x90, 0xF0, 0x90, 0x90
 ```
 
-The disassembler retains its human-readable prose output by default. Pass
-`--asm` (or `-a`) to emit assembler source accepted by `chip8-asm`; addresses
-are omitted, and unrecognized opcodes are preserved as `.word` directives.
+The disassembler uses human-readable prose output by default. Pass `--asm` (or `-a`) to emit assembler source for `chip8-asm`. Addresses are omitted. Unrecognized opcodes are preserved as `.word` directives.
 
 ```sh
 ./chip8-disas --asm program.ch8 > program.asm
@@ -177,23 +110,15 @@ are omitted, and unrecognized opcodes are preserved as `.word` directives.
 
 ## Testing
 
-Two helper scripts in `scripts/` drive the engines under a pty and capture
-results, since ROMs do not terminate on their own and the display is
-ncurses. Both send `q` to quit and SIGKILL the child as a safety net so the
-tool always returns. The assembler's byte-level regression suite can be run with:
+Two helper scripts in `scripts/` drive the engines under a pty. They capture results. ROMs do not terminate on their own. The display uses ncurses. Both scripts send `q` to quit. They send SIGKILL to the child as a safety net. The tool always returns. Run the assembler's byte-level regression suite with:
 
 ```sh
 make -C src test
 ```
 
-- **`run_dump.py <engine> <rom>`** captures the stderr state dump
-  (registers, PC, `I`, timers) while discarding the ncurses screen. Use it
-  for deterministic cross-engine comparisons of final machine state, e.g.
-  after a crafted micro-ROM.
+- **`run_dump.py <engine> <rom>`** captures the stderr state dump (registers, PC, `I`, timers). It discards the ncurses screen. Use it for deterministic cross-engine comparisons of final machine state.
 
-- **`tools/chip8opt.py`** is the deliberately conservative front-end for the
-  planned optimizer.  It currently analyzes assembler-compatible source and
-  canonicalizes it without changing its assembled bytes:
+- **`tools/chip8opt.py`** is the conservative front-end for the planned optimizer. It analyzes assembler-compatible source. It canonicalizes the source without changing its assembled bytes:
 
   ```sh
   src/chip8-disas --asm roms/PONG > pong.asm
@@ -204,25 +129,9 @@ make -C src test
   python3 tools/chip8opt.py optimize source.asm -o compact.asm
   ```
 
-  Analysis reports reachable instructions, CFG leaders/edges, declared data,
-  statically known `I`-relative reads/writes, and hazards.  A hazard is a
-  refusal to prove safety—not evidence that the ROM is broken.  In particular,
-  computed `JP V0`, dynamic `I`, and writes into the ROM payload are retained
-  for later optimizer passes to gate on.  `optimize` currently implements
-  byte-removing peepholes (no-op removal, dead pure loads, and `LD`/`ADD`
-  constant folding).  Direct numeric in-ROM `JP`, `CALL`, and `LD I` operands
-  are converted to generated labels before compaction, allowing their targets
-  to relocate safely.  It still refuses fixed-layout source (`.ORG`) and
-  hazards whose target cannot yet be relocated safely.
+  The analysis reports reachable instructions, CFG leaders/edges, declared data, and statically known `I`-relative reads/writes. A hazard is a refusal to prove safety. It is not evidence that the ROM is broken. Computed `JP V0`, dynamic `I`, and writes into the ROM payload remain for later optimizer passes. `optimize` currently implements byte-removing peepholes. These peepholes remove no-ops, dead pure loads, and `LD`/`ADD` constant folding. Direct numeric in-ROM `JP`, `CALL`, and `LD I` operands convert to generated labels before compaction. Their targets relocate safely. The optimizer refuses fixed-layout source (`.ORG`) and hazards whose target can not relocate safely.
 
-- **`screen_dump.py <engine> <rom> [--keys KEYS] [--ticks N | --hold SECS]`**
-  is the complement: it captures stdout, replays it through a small vt100
-  renderer so the CHIP-8 font glyphs land at their real screen positions,
-  and prints the readable screen plus the stderr state dump. Use it to read
-  a test ROM's on-screen verdict (e.g. the Timendus suite's `OK`/`FAIL`).
-  `--keys` feeds CHIP-8 keypresses to dismiss a splash screen; `--ticks N`
-  waits `N/60` s of settle time (the 60 Hz timer rate, accurate for
-  frame-drawing ROMs; use `--hold` for spin loops, which aren't tick-paced).
+- **`screen_dump.py <engine> <rom> [--keys KEYS] [--ticks N | --hold SECS]`** captures stdout. It replays the output through a small vt100 renderer. The CHIP-8 font glyphs land at their real screen positions. It prints the readable screen and the stderr state dump. Use it to read a test ROM's on-screen verdict. The Timendus suite uses `OK`/`FAIL`. `--keys` feeds CHIP-8 keypresses to dismiss a splash screen. `--ticks N` waits `N/60` s of settle time. This rate matches the 60 Hz timer for frame-drawing ROMs. Use `--hold` for spin loops.
 
 ```sh
 python3 scripts/run_dump.py src/chip8-interp roms/eq_sub.ch8          # register dump only
@@ -231,21 +140,18 @@ python3 scripts/screen_dump.py src/chip8-interp roms/test-roms/4-flags.ch8 --key
 
 ## Quirks / Compatibility Notes
 
-CHIP-8 has several well-known compatibility splits. This emulator makes explicit
-choices for interoperability with modern test ROMs (especially the Timendus
-suite). All three execution backends agree on these:
+CHIP-8 has several well-known compatibility splits. This emulator makes explicit choices for interoperability with modern test ROMs. The Timendus suite drives these choices. All three execution backends agree on these rules:
 
 | Opcode / area | Choice | Notes |
 |---|---|---|
-| `8xy6` / `8xyE` (shift) | **Modern / SCHIP**: shift `Vx` in place, ignore `Vy` | Original COSMAC VIP copied `Vy` into `Vx` then shifted (`regs[x]=regs[y]; regs[x]>>=1`). The interpreter comment `/* Y; */` and both JIT backends intentionally implement the modern quirk. Documented as a choice, not a bug. |
-| `Dxyn` (draw) | **Wrap-start + clip**: `x %= 64`, `y %= 32`, then clip sprite pixels that would go off the right / bottom edge | Old behavior wrapped every pixel (`x2=(x+i)%W, y2=(y+j)%H`). Quirks suite `5-quirks` expects clipping; now fixed in `draw_io` shared by all backends. |
+| `8xy6` / `8xyE` (shift) | **Modern / SCHIP**: shift `Vx` in place, ignore `Vy` | Original COSMAC VIP copied `Vy` into `Vx` then shifted (`regs[x]=regs[y]; regs[x]>>=1`). The interpreter comment `/* Y; */` and both JIT backends intentionally implement the modern quirk. This is a choice, not a bug. |
+| `Dxyn` (draw) | **Wrap-start + clip**: `x %= 64`, `y %= 32`, then clip sprite pixels that go off the right or bottom edge | Old behavior wrapped every pixel (`x2=(x+i)%W, y2=(y+j)%H`). Quirks suite `5-quirks` expects clipping. The fix is in `draw_io` shared by all backends. |
 | `8xy4/5/6/7/E` with `x==F` | **Snapshot then result-then-flag**: operands snapshotted, result stored to `Vx`, `VF` stored last so flag wins | Required by `4-flags.ch8`. |
 | `8xy5/8xy7` borrow | **NOT-borrow**: `VF = Vx >= Vy` (or `Vy >= Vx`) | Many ROMs expect `>=`, not strict `>`. |
-| `Fx55/Fx65`, `Fx33`, `Dxyn` + `Annn`/`Fx1E` | **12-bit wrap via `MEM_AT`**: address masked with `0xFFF` | COSMAC VIP 12-bit wrap; also prevents OOB host access. |
+| `Fx55/Fx65`, `Fx33`, `Dxyn` + `Annn`/`Fx1E` | **12-bit wrap via `MEM_AT`**: address masked with `0xFFF` | COSMAC VIP 12-bit wrap. This rule also prevents OOB host access. |
 | `Bnnn` | `PC = nnn + V0` with zero-extend | LLVM backend previously failed to extend `V0`. |
 | Timers | `uint8_t`, 0..255, decrement only when >0 | Signed timers previously hung on values >127. |
 
 ## Layout
 
-All source lives in `src/`. See `TODO.md` for known issues and unfinished work,
-and `LICENSE.md` for licensing (BSD-style, (c) 2021 James McClain).
+All source lives in `src/`. Read `LICENSE.md` for licensing (BSD-style, (c) 2021 James McClain).
