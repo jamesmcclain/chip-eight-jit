@@ -130,10 +130,10 @@ typedef void (*code)(void); // pointer to a compiled trace
 // process' dynamic symbol table so libgccjit can resolve them at compile
 // time -- the Makefile links chip8-libgccjit with -rdynamic for that reason.
 //
-// Each routine reads its own opcode back out of memory at program_counter,
-// exactly as the interpreter does; the JIT guarantees program_counter holds
-// the address of the calling instruction by emitting an inline "pc += 2"
-// after every non-control instruction in the trace.
+// Routines that decode their opcode read it back out of memory at
+// program_counter, exactly as the interpreter does.  The JIT materializes the
+// known instruction address immediately before those calls; inline stretches
+// keep the PC in the code generator instead of storing it after every opcode.
 
 void clear_key(uint8_t key)
 {
@@ -554,22 +554,22 @@ code codegen(void)
 
   gcc_jit_block *blk = gcc_jit_function_new_block(function, NULL);
 
-  // Convenience constants.
-  gcc_jit_rvalue *two16  = gcc_jit_context_new_rvalue_from_int(ctx, t_u16, 2);
-  gcc_jit_rvalue *four16 = gcc_jit_context_new_rvalue_from_int(ctx, t_u16, 4);
-
-  // The lvalue for the VM program counter is reused constantly.
+  // The lvalue for the VM program counter is reused at control-flow edges
+  // and before helpers that re-decode their opcode.
   #define PC_LVAL  mem(ctx, t_u16p, &program_counter)
-  // Emit "program_counter += 2" then continue compiling the next opcode.
+  // Inline instructions advance only the code generator's `pc`.
   // NB: no do/while wrapper -- the bare `continue` must target the for loop.
-  #define STEP_AND_CONTINUE \
-    gcc_jit_block_add_assignment_op(blk, NULL, PC_LVAL, \
-      GCC_JIT_BINARY_OP_PLUS, two16); \
-    continue
+  #define STEP_AND_CONTINUE continue
   // Emit a "call <name>()" for side effects.
   #define CALL_HOST(nm) \
     gcc_jit_block_add_eval(blk, NULL, \
       gcc_jit_context_new_call(ctx, NULL, host_fn(host, nm), 0, NULL))
+  // Helpers that decode OP_AT(program_counter) need the calling instruction's
+  // PC, not the stale value from the last trace boundary.
+  #define CALL_HOST_OP(nm) \
+    gcc_jit_block_add_assignment(blk, NULL, PC_LVAL, \
+      gcc_jit_context_new_rvalue_from_int(ctx, t_u16, pc)); \
+    CALL_HOST(nm)
   #define BAIL_ERRER  do { fprintf(stderr, "JIT codegen failed at pc=%04x\n", program_counter); gcc_jit_context_release(ctx); return NULL; } while (0)
   // Emit a lightweight safepoint: a volatile load of interrupt_pending and a
   // conditional call to check_interrupt(). The fast (flag clear) path is a
@@ -719,7 +719,7 @@ code codegen(void)
           }
         case 0x2:
           { // call
-            CALL_HOST("call");
+            CALL_HOST_OP("call");
             goto end_of_trace;
           }
         case 0x3: // skip if Vx == imm
@@ -794,16 +794,16 @@ code codegen(void)
               }
             else
               {
-                // "don't skip": advance one instruction and bounce to dispatch.
-                gcc_jit_block_add_assignment_op(else_blk, NULL,
-                  mem(ctx, t_u16p, &program_counter), GCC_JIT_BINARY_OP_PLUS, two16);
+                // "don't skip": materialize the successor and bounce.
+                gcc_jit_block_add_assignment(else_blk, NULL, PC_LVAL,
+                  gcc_jit_context_new_rvalue_from_int(ctx, t_u16, (uint16_t)(pc + 2)));
                 gcc_jit_block_end_with_void_return(else_blk, NULL);
               }
 
-            // "skip": advance two instructions and keep compiling inline.
+            // "skip": materialize its successor and keep compiling inline.
             blk = then_blk;
-            gcc_jit_block_add_assignment_op(blk, NULL,
-              mem(ctx, t_u16p, &program_counter), GCC_JIT_BINARY_OP_PLUS, four16);
+            gcc_jit_block_add_assignment(blk, NULL, PC_LVAL,
+              gcc_jit_context_new_rvalue_from_int(ctx, t_u16, (uint16_t)(pc + 4)));
             pc += 2; // skip the next opcode (loop adds the other +2)
             continue;
           }
@@ -933,12 +933,12 @@ code codegen(void)
           }
         case 0xc:
           { // Vx = rand() & imm
-            CALL_HOST("random_byte");
+            CALL_HOST_OP("random_byte");
             STEP_AND_CONTINUE;
           }
         case 0xd:
           { // draw
-            CALL_HOST("draw");
+            CALL_HOST_OP("draw");
             STEP_AND_CONTINUE;
           }
         case 0xe:
@@ -946,10 +946,10 @@ code codegen(void)
             switch (op & 0x00ff)
               {
               case 0x9e:
-                CALL_HOST("skip_key_x_down");
+                CALL_HOST_OP("skip_key_x_down");
                 goto end_of_trace;
               case 0xa1:
-                CALL_HOST("skip_key_x_up");
+                CALL_HOST_OP("skip_key_x_up");
                 goto end_of_trace;
               default:
                 BAIL_ERRER;
@@ -971,7 +971,7 @@ code codegen(void)
                 }
               case 0x0a:
                 { // Vx = blocking key read
-                  CALL_HOST("load_on_key");
+                  CALL_HOST_OP("load_on_key");
                   goto end_of_trace; // end trace to observe program_over / new pc
                 }
               case 0x15:
@@ -1014,13 +1014,13 @@ code codegen(void)
                   STEP_AND_CONTINUE;
                 }
               case 0x33:
-                CALL_HOST("store_bcd");
+                CALL_HOST_OP("store_bcd");
                 goto end_of_trace;
               case 0x55:
-                CALL_HOST("save_registers");
+                CALL_HOST_OP("save_registers");
                 goto end_of_trace;
               case 0x65:
-                CALL_HOST("restore_registers");
+                CALL_HOST_OP("restore_registers");
                 STEP_AND_CONTINUE;
               default:
                 BAIL_ERRER;
@@ -1058,6 +1058,7 @@ code codegen(void)
   #undef CLOSE_BACKEDGE
   #undef PC_LVAL
   #undef STEP_AND_CONTINUE
+  #undef CALL_HOST_OP
   #undef CALL_HOST
   #undef BAIL_ERRER
   #undef RETIRE
