@@ -67,6 +67,18 @@
     auto fn = module->getOrInsertFunction(host_fn_name, fn_type).getCallee(); \
     builder->CreateCall(fn_type, fn);
 
+// Keep the VM PC in host memory only where native code crosses into a helper
+// that re-decodes OP_AT(program_counter). Inline instructions carry their PC
+// in the code generator and do not need a store per architectural instruction.
+#define JIT_MATERIALIZE_PC(value) \
+  { \
+    JIT_GETPTR16(program_counter); \
+    builder->CreateStore(builder->getInt16(value), JIT_PTR(program_counter)); \
+  }
+#define JIT_CALL_OP(host_fn_name) \
+  JIT_MATERIALIZE_PC(pc); \
+  JIT_CALL(host_fn_name)
+
 #define JIT_GETPTR16(var) \
   auto JIT_LOC(var) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint16_t *)*8, reinterpret_cast<uint64_t>(&var), false)); \
   auto JIT_PTR(var) = builder->CreateIntToPtr(JIT_LOC(var), llvm::PointerType::getUnqual(*context));
@@ -84,13 +96,7 @@
 #define JIT_IMM8 \
   auto JIT_VALUE(immediate) = builder->getInt8(immediate);
 
-#define JIT_STEP \
-  JIT_GETPTR16(program_counter); \
-  JIT_LOAD16(program_counter); \
-  auto two = builder->getInt16(2); \
-  auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two); \
-  builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); \
-  continue;
+#define JIT_STEP continue
 #define JIT_RETURN builder->CreateRet(nullptr);
 // Bench builds account for architectural CHIP-8 instructions so the virtual
 // clock matches the interpreter's. The count is of instructions the trace
@@ -684,7 +690,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
         }
       case 0x2:
         {
-          JIT_CALL("call");
+          JIT_CALL_OP("call");
           JIT_DONE;
         }
       case 0x3: // skip_eq_immediate
@@ -692,10 +698,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
       case 0x5: // skip_eq_register
       case 0x9: // skip_neq_register
         {
-          auto two = builder->getInt16(2);
-          auto four = builder->getInt16(4);
           JIT_GETPTR16(program_counter);
-          JIT_LOAD16(program_counter);
 
           // CHIP-8 has no conditional branch: every one is written as a skip
           // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
@@ -774,16 +777,16 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             }
           else
             {
-              auto pc_plus_two = builder->CreateAdd(JIT_VALUE(program_counter), two);
-              builder->CreateStore(pc_plus_two, JIT_PTR(program_counter)); // set VM pc
+              builder->CreateStore(builder->getInt16((uint16_t)(pc + 2)),
+                                   JIT_PTR(program_counter)); // set VM pc
               JIT_RETURN; // return control
             }
 
           // "then" (do skip) block
           basic_block = then_block;
           builder->SetInsertPoint(basic_block);
-          auto pc_plus_four = builder->CreateAdd(JIT_VALUE(program_counter), four);
-          builder->CreateStore(pc_plus_four, JIT_PTR(program_counter)); // set VM pc
+          builder->CreateStore(builder->getInt16((uint16_t)(pc + 4)),
+                               JIT_PTR(program_counter)); // set VM pc
           pc+=2; // skip next instruction
           continue; // continue JITing along this path
         }
@@ -929,12 +932,12 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
         }
       case 0xc:
         {
-          JIT_CALL("random_byte");
+          JIT_CALL_OP("random_byte");
           JIT_STEP;
         }
       case 0xd:
         {
-          JIT_CALL("draw");
+          JIT_CALL_OP("draw");
           JIT_STEP;
         }
       case 0xe:
@@ -943,12 +946,12 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
             {
             case 0x9e:
               {
-                JIT_CALL("skip_key_x_down");
+                JIT_CALL_OP("skip_key_x_down");
                 JIT_DONE;
               }
             case 0xa1:
               {
-                JIT_CALL("skip_key_x_up");
+                JIT_CALL_OP("skip_key_x_up");
                 JIT_DONE;
               }
             default:
@@ -974,7 +977,7 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               }
             case 0x0a:
               {
-                JIT_CALL("load_on_key");
+                JIT_CALL_OP("load_on_key");
                 JIT_DONE; // need to end trace here to check for program exit
               }
             case 0x15:
@@ -1022,17 +1025,17 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
               }
             case 0x33:
               {
-                JIT_CALL("store_bcd");
+                JIT_CALL_OP("store_bcd");
                 JIT_DONE;
               }
             case 0x55:
               {
-                JIT_CALL("save_registers");
+                JIT_CALL_OP("save_registers");
                 JIT_DONE;
               }
             case 0x65:
               {
-                JIT_CALL("restore_registers");
+                JIT_CALL_OP("restore_registers");
                 JIT_STEP;
               }
             default:
