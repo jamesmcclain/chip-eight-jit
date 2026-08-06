@@ -54,3 +54,7 @@ per backend at 5,000,000 requested instructions, and emits metrics.
   1M-instruction differential testing passed for both JITs. Measurement:
   `rate_mins=27.543192`; LLVM `84.164550`; libgccjit `9.013622`. Keep and use
   this as the new baseline.
+- Candidate 2 (discarded): increased the threshold to 256. It passed the full
+  differential suite, but two independent measurements gave `rate_mins`
+  values of `27.868697` and `26.883782`; the apparent gain over 64 was below
+  the observed noise. Restored 64 to retain tighter bounded stop latency.
