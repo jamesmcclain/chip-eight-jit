@@ -89,7 +89,7 @@ static void alarm_handler(int signum)
 static void init_interrupt_timer(void)
 {
 #ifdef BENCH
-  interrupt_pending = 1; // pinned; see check_interrupt()
+  interrupt_pending = 0;
   return;
 #else
   struct sigaction sa;
@@ -226,9 +226,6 @@ void interrupt()
 void check_interrupt()
 {
 #ifdef BENCH
-  // No asynchronous timer in bench mode: interrupt_pending stays pinned so
-  // that every emitted safepoint takes this path, making the servicing
-  // points a property of the compiled code rather than of wall-clock time.
   interrupt();
   if (bench_done())
     {
@@ -250,6 +247,14 @@ void check_interrupt()
     }
 #endif
 }
+
+#ifdef BENCH
+void bench_safepoint(void)
+{
+  check_interrupt();
+  bench_advance_safepoint();
+}
+#endif
 
 void errer()
 {
@@ -463,6 +468,9 @@ snapshot(gcc_jit_context *ctx, gcc_jit_function *fn, gcc_jit_block *blk,
 // in every trace context (unused declarations are harmless).
 static const char *HOST_FNS[] = {
   "interrupt", "check_interrupt", "clearscreen_io", "retern", "call", "random_byte", "draw",
+#ifdef BENCH
+  "bench_safepoint",
+#endif
   "skip_key_x_down", "skip_key_x_up", "load_on_key", "store_bcd",
   "save_registers", "restore_registers",
 #ifdef BENCH
@@ -571,10 +579,29 @@ code codegen(void)
       gcc_jit_context_new_rvalue_from_int(ctx, t_u16, pc)); \
     CALL_HOST(nm)
   #define BAIL_ERRER  do { fprintf(stderr, "JIT codegen failed at pc=%04x\n", program_counter); gcc_jit_context_release(ctx); return NULL; } while (0)
-  // Emit a lightweight safepoint: a volatile load of interrupt_pending and a
-  // conditional call to check_interrupt(). The fast (flag clear) path is a
-  // single load-and-branch, so these can be sprinkled liberally through
-  // traces without hurting throughput; the slow path services timers/input.
+  // Emit a lightweight safepoint. Interactive builds load the asynchronous
+  // interrupt flag. BENCH builds compare retired work with a deterministic
+  // threshold, avoiding a host call at every native loop back-edge.
+#ifdef BENCH
+  #define SAFEPOINT() \
+    do { \
+      char sname[24], cname[24]; \
+      snprintf(sname, sizeof(sname), "sp_slow_%d", block_id); \
+      snprintf(cname, sizeof(cname), "sp_cont_%d", block_id); \
+      ++block_id; \
+      gcc_jit_block *slow_blk = gcc_jit_function_new_block(function, sname); \
+      gcc_jit_block *cont_blk = gcc_jit_function_new_block(function, cname); \
+      gcc_jit_rvalue *retired = gcc_jit_lvalue_as_rvalue(mem(ctx, t_i64p, &bench_retired)); \
+      gcc_jit_rvalue *next = gcc_jit_lvalue_as_rvalue(mem(ctx, t_i64p, (void *)&bench_next_safepoint)); \
+      gcc_jit_rvalue *pending = gcc_jit_context_new_comparison(ctx, NULL, \
+        GCC_JIT_COMPARISON_GE, retired, next); \
+      gcc_jit_block_end_with_conditional(blk, NULL, pending, slow_blk, cont_blk); \
+      gcc_jit_block_add_eval(slow_blk, NULL, \
+        gcc_jit_context_new_call(ctx, NULL, host_fn(host, "bench_safepoint"), 0, NULL)); \
+      gcc_jit_block_end_with_jump(slow_blk, NULL, cont_blk); \
+      blk = cont_blk; \
+    } while (0)
+#else
   #define SAFEPOINT() \
     do { \
       char sname[24], cname[24]; \
@@ -594,6 +621,7 @@ code codegen(void)
       gcc_jit_block_end_with_jump(slow_blk, NULL, cont_blk); \
       blk = cont_blk; \
     } while (0)
+#endif
 
   // Close a back edge: branch to `dst`, a block already emitted in this trace,
   // instead of returning to the dispatcher. Terminates blk.
