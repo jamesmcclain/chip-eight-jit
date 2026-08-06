@@ -60,3 +60,6 @@ per backend at 5,000,000 requested instructions, and emits metrics.
   differential suite, but two independent measurements gave `rate_mins`
   values of `27.868697` and `26.883782`; the apparent gain over 64 was below
   the observed noise. Restored 64 to retain tighter bounded stop latency.
+- Candidate 3 (discarded): threshold 128 measured `rate_mins=25.639986`, below
+  the repeated 64-interval result. No correctness run was needed: it changes
+  only the same threshold schedule already differentially tested at 256.
