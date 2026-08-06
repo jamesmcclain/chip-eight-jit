@@ -47,6 +47,10 @@ extern "C" {
    period-accurate CHIP-8 does in one tick, but its only real requirement is
    that every engine uses the same number. */
 #define BENCH_INSTR_PER_TICK (2000)
+/* Native traces check the stop condition at this architectural-instruction
+   cadence. This keeps BENCH deterministic without taking a host call at every
+   JIT safepoint. */
+#define BENCH_SAFEPOINT_INTERVAL (64)
 /* The 60 Hz tick counter wraps exactly as the wall-clock tick() does. */
 #define BENCH_TICKS_PER_SECOND (60)
 /* Clock charged for one input poll, so spin loops that retire no instructions
@@ -70,6 +74,7 @@ extern long long bench_retired;    /* architectural CHIP-8 instructions */
 extern long long bench_poll_clock; /* clock charged for input polls */
 extern long long bench_budget;     /* stop once bench_retired reaches this */
 extern long long bench_clock_cap;  /* stop once the virtual clock reaches this */
+extern volatile long long bench_next_safepoint; /* next JIT slow-path check */
 
 #define bench_now() (bench_retired + bench_poll_clock)
 /* Traces compiled and trace-cache flushes: JIT compile pressure is a first
@@ -86,6 +91,9 @@ int bench_parse_args(int argc, const char *argv[], const char **rom);
 
 /* Non-zero once the instruction budget or the clock cap has been reached. */
 int bench_done(void);
+
+/* Advance the deterministic JIT safepoint schedule beyond bench_retired. */
+void bench_advance_safepoint(void);
 
 /* The virtual 60 Hz tick, replacing the wall-clock tick(). */
 int bench_tick(void);

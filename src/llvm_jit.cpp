@@ -116,10 +116,30 @@
 #endif
 #define JIT_DONE goto end_of_trace;
 
-// Emit a lightweight safepoint: a volatile load of interrupt_pending and a
-// conditional call to check_interrupt(). The fast (flag clear) path is a
-// single load-and-branch, so these can be sprinkled liberally through traces
-// without hurting throughput; the slow path services timers and input.
+// Emit a lightweight safepoint. Interactive builds load the asynchronous
+// interrupt flag. BENCH builds compare retired work with a deterministic
+// threshold, avoiding a host call at every native loop back-edge.
+#ifdef BENCH
+#define JIT_SAFEPOINT \
+  { \
+    auto i64ty_sp = llvm::Type::getInt64Ty(*context); \
+    auto retired_loc = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(void *)*8, reinterpret_cast<uint64_t>(&bench_retired), false)); \
+    auto retired_ptr = builder->CreateIntToPtr(retired_loc, llvm::PointerType::getUnqual(*context)); \
+    auto next_loc = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(void *)*8, reinterpret_cast<uint64_t>(&bench_next_safepoint), false)); \
+    auto next_ptr = builder->CreateIntToPtr(next_loc, llvm::PointerType::getUnqual(*context)); \
+    auto retired = builder->CreateLoad(i64ty_sp, retired_ptr); \
+    auto next = builder->CreateLoad(i64ty_sp, next_ptr, true /* volatile */); \
+    auto pending = builder->CreateICmpSGE(retired, next); \
+    auto slow_block = llvm::BasicBlock::Create(*context, "", function); \
+    auto cont_block = llvm::BasicBlock::Create(*context, "", function); \
+    builder->CreateCondBr(pending, slow_block, cont_block); \
+    builder->SetInsertPoint(slow_block); \
+    { JIT_CALL("bench_safepoint"); } \
+    builder->CreateBr(cont_block); \
+    basic_block = cont_block; \
+    builder->SetInsertPoint(basic_block); \
+  }
+#else
 #define JIT_SAFEPOINT \
   { \
     auto int32ty_sp = llvm::Type::getInt32Ty(*context); \
@@ -136,6 +156,7 @@
     basic_block = cont_block; \
     builder->SetInsertPoint(basic_block); \
   }
+#endif
 
 // Close a back edge: branch to `dst`, a block already emitted in this trace,
 // instead of returning to the dispatcher. Terminates the current block.
@@ -226,7 +247,7 @@ static void alarm_handler(int signum)
 static void init_interrupt_timer()
 {
 #ifdef BENCH
-  interrupt_pending = 1; // pinned; see check_interrupt()
+  interrupt_pending = 0;
   return;
 #else
   struct sigaction sa;
@@ -355,9 +376,6 @@ extern "C"
   void check_interrupt()
   {
 #ifdef BENCH
-    // No asynchronous timer in bench mode: interrupt_pending stays pinned so
-    // that every emitted safepoint takes this path, making the servicing
-    // points a property of the compiled code rather than of wall-clock time.
     interrupt();
     if (bench_done())
       {
@@ -379,6 +397,14 @@ extern "C"
       }
 #endif
   }
+
+#ifdef BENCH
+  void bench_safepoint()
+  {
+    check_interrupt();
+    bench_advance_safepoint();
+  }
+#endif
 
   void errer()
   {

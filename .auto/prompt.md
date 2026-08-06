@@ -44,4 +44,13 @@ per backend at 5,000,000 requested instructions, and emits metrics.
 - Maximum of 12 experiments.
 
 ## What's Been Tried
-- Baseline pending.
+- Baseline: `rate_mins=22.105230`; LLVM geometric mean `60.241814`, libgccjit
+  geometric mean `8.111330`. Three samples per ROM/backend at 5M requested
+  instructions.
+- Candidate 1: added a shared 64-instruction BENCH safepoint threshold. BENCH
+  traces compare `bench_retired` with `bench_next_safepoint` and call a new
+  backend-local `bench_safepoint()` only when due. The helper retains timer
+  synchronization and budget detection, then advances the threshold. Full
+  1M-instruction differential testing passed for both JITs. Measurement:
+  `rate_mins=27.543192`; LLVM `84.164550`; libgccjit `9.013622`. Keep and use
+  this as the new baseline.

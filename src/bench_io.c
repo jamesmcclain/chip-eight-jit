@@ -21,6 +21,7 @@ long long bench_retired = 0;
 long long bench_poll_clock = 0;
 long long bench_budget = BENCH_DEFAULT_INSTRUCTIONS;
 long long bench_clock_cap = BENCH_DEFAULT_INSTRUCTIONS * BENCH_CLOCK_CAP_FACTOR;
+volatile long long bench_next_safepoint = BENCH_SAFEPOINT_INTERVAL;
 long long bench_compiled = 0;
 long long bench_flushes = 0;
 unsigned  bench_seed = BENCH_DEFAULT_SEED;
@@ -157,6 +158,15 @@ int bench_done(void)
   return (bench_retired >= bench_budget) || (bench_now() >= bench_clock_cap);
 }
 
+void bench_advance_safepoint(void)
+{
+  do
+    {
+      bench_next_safepoint += BENCH_SAFEPOINT_INTERVAL;
+    }
+  while (bench_next_safepoint <= bench_retired);
+}
+
 uint64_t bench_display_hash(void)
 {
   uint64_t h = 1469598103934665603ULL;
@@ -235,6 +245,7 @@ int bench_parse_args(int argc, const char *argv[], const char **rom)
       return 1;
     }
   bench_clock_cap = bench_budget * BENCH_CLOCK_CAP_FACTOR;
+  bench_next_safepoint = BENCH_SAFEPOINT_INTERVAL;
 
   clock_gettime(CLOCK_MONOTONIC, &bench_start);
   return 0;
