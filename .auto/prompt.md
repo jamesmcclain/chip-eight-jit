@@ -63,3 +63,5 @@ per backend at 5,000,000 requested instructions, and emits metrics.
 - Candidate 3 (discarded): threshold 128 measured `rate_mins=25.639986`, below
   the repeated 64-interval result. No correctness run was needed: it changes
   only the same threshold schedule already differentially tested at 256.
+- Candidate 4 (discarded): threshold 32 measured `rate_mins=26.377256`, also
+  below the repeated 64-interval result. Restored 64.
