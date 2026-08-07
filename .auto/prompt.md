@@ -30,4 +30,5 @@ per ROM, and reports median per-ROM rates plus their geometric mean.
 ## What's Been Tried
 - Baseline geometric mean: about 50 Minsn/s (PONG ~103, TETRIS ~52, BLINKY ~24), with appreciable host noise.
 - Replacing all regs[] accesses with 16 local allocas and spilling/reloading all registers at every call and trace return was correct on the three-ROM differential suite but regressed to ~26 Minsn/s. Omitting barriers for safepoint, timer, clear, and return helpers improved only to ~32 Minsn/s. Discarded. The all-register exit barrier and/or generated code needs inspection before retrying that shape.
-- Next: isolate a V0-only promotion to measure whether trace-exit materialization alone defeats the gain.
+- Optimized IR inspection is complete: PONG hot trace ADDR212 has only 4 i8 loads and 8 i8 stores after O2, but benchmark retirement accounting emits an i64 load/add/store for every retired opcode. Calls make VM state observable. Whole-file spilling therefore costs more than it saves.
+- Next: only attempt promotion with trace-local dirty-register tracking, so exits and helpers spill a proven subset; inspect the resulting IR before throughput measurement.
