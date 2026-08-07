@@ -3,14 +3,14 @@
 # Prerequisite: `make -C src chip8-aot aot-runtime-objs` has already run.
 set -eu
 
-if [ "$#" -ne 3 ] || [ "$2" != "-o" ]; then
-    echo "Usage: $0 ROM -o OUTPUT" >&2
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 ROM OUTPUT" >&2
     exit 64
 fi
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 rom=$1
-output=$3
+output=$2
 compiler="$root/src/chip8-aot"
 clang=${CLANG:-clang}
 
