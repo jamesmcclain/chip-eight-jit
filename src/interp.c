@@ -15,8 +15,8 @@
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
-#define NANOS_PER_TICK (16666666) // ~60 Hz clock
-#define TICKS_PER_SECOND (60) // ~60 Hz clock
+#define NANOS_PER_TICK (16666666)	// ~60 Hz clock
+#define TICKS_PER_SECOND (60)	// ~60 Hz clock
 
 int last_tick = 0;
 
@@ -24,15 +24,16 @@ uint8_t delay_timer = 0;
 uint8_t sound_timer = 0;
 uint16_t op = 0;
 
-#define INPUT_TICKS (10) // roughly 1/6 window for input
+#define INPUT_TICKS (10)	// roughly 1/6 window for input
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 
 
-void clear_key(uint8_t key)
+void
+clear_key (uint8_t key)
 {
 #ifdef BENCH
-  bench_clear_key(key);
+  bench_clear_key (key);
 #else
   for (int i = 0; i < INPUT_TICKS; ++i)
     {
@@ -41,10 +42,11 @@ void clear_key(uint8_t key)
 #endif
 }
 
-uint32_t all_keys_down()
+uint32_t
+all_keys_down ()
 {
 #ifdef BENCH
-  return bench_keys_now();
+  return bench_keys_now ();
 #else
   uint32_t all_keys = 0;
 
@@ -56,14 +58,15 @@ uint32_t all_keys_down()
 #endif
 }
 
-int tick()
+int
+tick ()
 {
 #ifdef BENCH
-  return bench_tick();
+  return bench_tick ();
 #else
   struct timespec spec;
 
-  clock_gettime(CLOCK_MONOTONIC, &spec);
+  clock_gettime (CLOCK_MONOTONIC, &spec);
   return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
 #endif
 }
@@ -75,62 +78,67 @@ int tick()
 // happens to service interrupts. Without it the interpreter (which services
 // on every jump) and the JITs (which service at safepoints) disagree
 // whenever a timer is read close to a tick boundary.
-void sync_timers(void)
+void
+sync_timers (void)
 {
-  int now = tick();
+  int now = tick ();
   int elapsed = now - last_tick;
 
   if (elapsed > 0)
     {
-      delay_timer = (delay_timer > elapsed) ? (uint8_t)(delay_timer - elapsed) : 0;
-      sound_timer = (sound_timer > elapsed) ? (uint8_t)(sound_timer - elapsed) : 0;
+      delay_timer = (delay_timer > elapsed) ? (uint8_t) (delay_timer - elapsed) : 0;
+      sound_timer = (sound_timer > elapsed) ? (uint8_t) (sound_timer - elapsed) : 0;
       last_tick = now;
     }
 }
 #endif
 
-void interrupt()
+void
+interrupt ()
 {
 #ifdef BENCH
-  sync_timers(); // keys are polled on demand, not ringed
+  sync_timers ();		// keys are polled on demand, not ringed
 #else
-  int current_tick = tick();
+  int current_tick = tick ();
 
   if (current_tick != last_tick)
     {
       if (delay_timer > 0)
-        {
-          --delay_timer;
-        }
+	{
+	  --delay_timer;
+	}
       if (sound_timer > 0)
-        {
-          --sound_timer;
-        }
+	{
+	  --sound_timer;
+	}
       last_tick = current_tick;
     }
-  keys_down[interrupt_count] = read_keys_io();
+  keys_down[interrupt_count] = read_keys_io ();
   interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
 #endif
 }
 
-uint32_t clearscreen()
+uint32_t
+clearscreen ()
 {
-  clearscreen_io();
+  clearscreen_io ();
   STEP;
 }
 
-uint32_t jump()
+uint32_t
+jump ()
 {
   IMMEDIATE12;
 
-  interrupt();
+  interrupt ();
   program_counter = immediate;
   return 0;
 }
 
-uint32_t retern()
+uint32_t
+retern ()
 {
-  interrupt();
+  interrupt ();
   if (stack_pointer > 0)
     {
       program_counter = stack[--stack_pointer];
@@ -140,11 +148,12 @@ uint32_t retern()
     ERROR;
 }
 
-uint32_t call()
+uint32_t
+call ()
 {
   IMMEDIATE12;
 
-  interrupt();
+  interrupt ();
   if (stack_pointer < STACK_SIZE)
     {
       stack[stack_pointer++] = program_counter + 2;
@@ -155,90 +164,110 @@ uint32_t call()
     ERROR;
 }
 
-uint32_t skip_eq_immediate()
+uint32_t
+skip_eq_immediate ()
 {
-  X; IMMEDIATE8;
+  X;
+  IMMEDIATE8;
 
   if (regs[x] == immediate)
     {
-      program_counter+=2;
+      program_counter += 2;
     }
   STEP;
 }
 
-uint32_t skip_neq_immediate()
+uint32_t
+skip_neq_immediate ()
 {
-  X; IMMEDIATE8;
+  X;
+  IMMEDIATE8;
 
   if (regs[x] != immediate)
     {
-      program_counter+=2;
+      program_counter += 2;
     }
   STEP;
 }
 
-uint32_t skip_eq_register()
+uint32_t
+skip_eq_register ()
 {
-  X; Y;
+  X;
+  Y;
 
   if (regs[x] == regs[y])
     {
-      program_counter+=2;
+      program_counter += 2;
     }
   STEP;
 }
 
-uint32_t load_immediate()
+uint32_t
+load_immediate ()
 {
-  X; IMMEDIATE8;
+  X;
+  IMMEDIATE8;
 
   regs[x] = immediate;
   STEP;
 }
 
-uint32_t add_immediate()
+uint32_t
+add_immediate ()
 {
-  X; IMMEDIATE8;
+  X;
+  IMMEDIATE8;
 
   regs[x] += immediate;
   STEP;
 }
 
-uint32_t move()
+uint32_t
+move ()
 {
-  X; Y;
+  X;
+  Y;
 
   regs[x] = regs[y];
   STEP;
 }
 
-uint32_t or()
+uint32_t
+or ()
 {
-  X; Y;
+  X;
+  Y;
 
   regs[x] |= regs[y];
   STEP;
 }
 
-uint32_t and()
+uint32_t
+and ()
 {
-  X; Y;
+  X;
+  Y;
 
   regs[x] &= regs[y];
   STEP;
 }
 
-uint32_t xor()
+uint32_t
+xor ()
 {
-  X; Y;
+  X;
+  Y;
 
   regs[x] ^= regs[y];
   STEP;
 }
 
-uint32_t add_register()
+uint32_t
+add_register ()
 {
-  X; Y;
+  X;
+  Y;
 
   uint16_t tmp = regs[x] + regs[y];
   regs[x] = tmp;
@@ -246,9 +275,11 @@ uint32_t add_register()
   STEP;
 }
 
-uint32_t sub_register()
+uint32_t
+sub_register ()
 {
-  X; Y;
+  X;
+  Y;
 
   uint8_t vx = regs[x], vy = regs[y];
   regs[x] = vx - vy;
@@ -256,7 +287,8 @@ uint32_t sub_register()
   STEP;
 }
 
-uint32_t shift_right()
+uint32_t
+shift_right ()
 {
   X;
   /* Y; */
@@ -268,9 +300,11 @@ uint32_t shift_right()
   STEP;
 }
 
-uint32_t subn_register()
+uint32_t
+subn_register ()
 {
-  X; Y;
+  X;
+  Y;
 
   uint8_t vx = regs[x], vy = regs[y];
   regs[x] = vy - vx;
@@ -278,7 +312,8 @@ uint32_t subn_register()
   STEP;
 }
 
-uint32_t shift_left()
+uint32_t
+shift_left ()
 {
   X;
   /* Y; */
@@ -290,18 +325,21 @@ uint32_t shift_left()
   STEP;
 }
 
-uint32_t skip_neq_register()
+uint32_t
+skip_neq_register ()
 {
-  X; Y;
+  X;
+  Y;
 
   if (regs[x] != regs[y])
     {
-      program_counter+=2;
+      program_counter += 2;
     }
   STEP;
 }
 
-uint32_t load_addr_immediate()
+uint32_t
+load_addr_immediate ()
 {
   IMMEDIATE12;
 
@@ -309,7 +347,8 @@ uint32_t load_addr_immediate()
   STEP;
 }
 
-uint32_t branch()
+uint32_t
+branch ()
 {
   IMMEDIATE12;
 
@@ -317,48 +356,54 @@ uint32_t branch()
   return 0;
 }
 
-uint32_t random_byte()
+uint32_t
+random_byte ()
 {
-  X; IMMEDIATE8;
+  X;
+  IMMEDIATE8;
 
-  regs[x] = rand() & 0xff & immediate;
+  regs[x] = rand () & 0xff & immediate;
   STEP;
 }
 
-uint32_t get_delay_timer()
+uint32_t
+get_delay_timer ()
 {
   X;
 
 #ifdef BENCH
-  sync_timers(); // observe the timer at the current virtual clock
+  sync_timers ();		// observe the timer at the current virtual clock
 #endif
   regs[x] = delay_timer;
   STEP;
 }
 
-uint32_t set_delay_timer()
+uint32_t
+set_delay_timer ()
 {
   X;
 
 #ifdef BENCH
-  sync_timers(); // observe the timer at the current virtual clock
+  sync_timers ();		// observe the timer at the current virtual clock
 #endif
   delay_timer = regs[x];
   STEP;
 }
 
-uint32_t set_sound_timer()
+uint32_t
+set_sound_timer ()
 {
   X;
 
 #ifdef BENCH
-  sync_timers(); // observe the timer at the current virtual clock
+  sync_timers ();		// observe the timer at the current virtual clock
 #endif
   sound_timer = regs[x];
   STEP;
 }
 
-uint32_t add_addr()
+uint32_t
+add_addr ()
 {
   X;
 
@@ -366,7 +411,8 @@ uint32_t add_addr()
   STEP;
 }
 
-uint32_t store_bcd()
+uint32_t
+store_bcd ()
 {
   X;
   uint8_t tmp = regs[x];
@@ -376,25 +422,27 @@ uint32_t store_bcd()
   tmp %= 100;
   tens = tmp / 10;
   tmp %= 10;
-  MEM_AT(addr+0) = hundreds;
-  MEM_AT(addr+1) = tens;
-  MEM_AT(addr+2) = tmp;
+  MEM_AT (addr + 0) = hundreds;
+  MEM_AT (addr + 1) = tens;
+  MEM_AT (addr + 2) = tmp;
   STEP;
 }
 
-uint32_t skip_key_x(int up)
+uint32_t
+skip_key_x (int up)
 {
   X;
 
-  if (((all_keys_down() & (1<<(regs[x]))) != 0) ^ up)
+  if (((all_keys_down () & (1 << (regs[x]))) != 0) ^ up)
     {
-      clear_key(regs[x]);
-      program_counter+=2;
+      clear_key (regs[x]);
+      program_counter += 2;
     }
   STEP;
 }
 
-uint32_t load_on_key()
+uint32_t
+load_on_key ()
 {
   X;
   uint32_t all_keys = 0;
@@ -405,27 +453,28 @@ uint32_t load_on_key()
       // Polling charges the virtual clock, so the synthetic keyboard always
       // delivers eventually; bail out if the run is over regardless (--keys
       // none never produces one).
-      all_keys = read_keys_io();
-      if (bench_done())
-        {
-          break;
-        }
+      all_keys = read_keys_io ();
+      if (bench_done ())
+	{
+	  break;
+	}
 #else
-      usleep(10);
-      all_keys = read_keys_io();
+      usleep (10);
+      all_keys = read_keys_io ();
 #endif
-    } while((all_keys) == 0);
+    }
+  while ((all_keys) == 0);
 
   for (int i = 0; i < 16; ++i)
     {
-      clear_key(i);
-      if (all_keys & (1<<i))
-        {
-          regs[x] = i;
-        }
+      clear_key (i);
+      if (all_keys & (1 << i))
+	{
+	  regs[x] = i;
+	}
     }
 
-  if (all_keys & (1<<31))
+  if (all_keys & (1 << 31))
     {
       ERROR;
     }
@@ -435,57 +484,63 @@ uint32_t load_on_key()
     }
 }
 
-uint32_t draw()
+uint32_t
+draw ()
 {
-  X; Y; IMMEDIATE4;
+  X;
+  Y;
+  IMMEDIATE4;
   int current_tick;
 
-  interrupt();
+  interrupt ();
   uint8_t sprite[16];
   for (int i = 0; i < immediate; ++i)
     {
-      sprite[i] = MEM_AT(addr+i);
+      sprite[i] = MEM_AT (addr + i);
     }
-  FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
+  FLAGS = draw_io (regs[x], regs[y], immediate, sprite);
 #ifndef BENCH
   // Frame sync: hold the draw until the 60 Hz tick rolls over. Skipped in
   // bench mode -- there is no display to pace, and blocking on a clock that
   // only advances with retired instructions would deadlock.
-  while((current_tick = tick()) == last_tick)
+  while ((current_tick = tick ()) == last_tick)
     {
-      usleep(NANOS_PER_TICK>>10);
+      usleep (NANOS_PER_TICK >> 10);
     }
   last_tick = current_tick;
 #else
-  (void)current_tick;
+  (void) current_tick;
 #endif
-  refresh_io();
+  refresh_io ();
   STEP;
 }
 
-uint32_t save_registers()
+uint32_t
+save_registers ()
 {
   X;
 
   for (int i = 0; i <= x; ++i)
     {
-      MEM_AT(addr+i) = regs[i];
+      MEM_AT (addr + i) = regs[i];
     }
   STEP;
 }
 
-uint32_t restore_registers()
+uint32_t
+restore_registers ()
 {
   X;
 
   for (int i = 0; i <= x; ++i)
     {
-      regs[i] = MEM_AT(addr+i);
+      regs[i] = MEM_AT (addr + i);
     }
   STEP;
 }
 
-uint32_t load_sprite_addr()
+uint32_t
+load_sprite_addr ()
 {
   X;
 
@@ -493,112 +548,113 @@ uint32_t load_sprite_addr()
   STEP;
 }
 
-uint32_t basic_block()
+uint32_t
+basic_block ()
 {
-  op = OPCODE_AT(program_counter);
+  op = OPCODE_AT (program_counter);
 
   if (op == 0x00e0)
     {
-      return clearscreen();
+      return clearscreen ();
     }
   else if (op == 0x00ee)
     {
-      return retern();
+      return retern ();
     }
 
   switch ((op & 0xf000) >> 12)
     {
     case 0x0:
-      return jump();
+      return jump ();
     case 0x1:
-      return jump();
+      return jump ();
     case 0x2:
-      return call();
+      return call ();
     case 0x3:
-      return skip_eq_immediate();
+      return skip_eq_immediate ();
     case 0x4:
-      return skip_neq_immediate();
+      return skip_neq_immediate ();
     case 0x5:
-      return skip_eq_register();
+      return skip_eq_register ();
     case 0x6:
-      return load_immediate();
+      return load_immediate ();
     case 0x7:
-      return add_immediate();
+      return add_immediate ();
     case 0x8:
       {
-        switch (op & 0x000f)
-          {
-          case 0x0:
-            return move();
-          case 0x1:
-            return or();
-          case 0x2:
-            return and();
-          case 0x3:
-            return xor();
-          case 0x4:
-            return add_register();
-          case 0x5:
-            return sub_register();
-          case 0x6:
-            return shift_right();
-          case 0x7:
-            return subn_register();
-          case 0xe:
-            return shift_left();
-          default:
-            ERROR;
-          }
+	switch (op & 0x000f)
+	  {
+	  case 0x0:
+	    return move ();
+	  case 0x1:
+	    return or ();
+	  case 0x2:
+	    return and ();
+	  case 0x3:
+	    return xor ();
+	  case 0x4:
+	    return add_register ();
+	  case 0x5:
+	    return sub_register ();
+	  case 0x6:
+	    return shift_right ();
+	  case 0x7:
+	    return subn_register ();
+	  case 0xe:
+	    return shift_left ();
+	  default:
+	    ERROR;
+	  }
       }
     case 0x9:
-      return skip_neq_register();
+      return skip_neq_register ();
     case 0xa:
-      return load_addr_immediate();
+      return load_addr_immediate ();
     case 0xb:
-      return branch();
+      return branch ();
     case 0xc:
-      return random_byte();
+      return random_byte ();
     case 0xd:
-      return draw();
+      return draw ();
     case 0xe:
       {
-        switch (op & 0x00ff)
-          {
-          case 0x9e:
-            return skip_key_x(0);
-          case 0xa1:
-            return skip_key_x(1);
-          default:
-            ERROR;
-          }
-        break; // silence -Wimplicit-fallthrough; ERROR returns
+	switch (op & 0x00ff)
+	  {
+	  case 0x9e:
+	    return skip_key_x (0);
+	  case 0xa1:
+	    return skip_key_x (1);
+	  default:
+	    ERROR;
+	  }
+	break;			// silence -Wimplicit-fallthrough; ERROR returns
       }
     case 0xf:
       {
-        switch (op & 0x00ff)
-          {
-          case 0x07:
-            return get_delay_timer();
-          case 0x0a:
-            return load_on_key();
-          case 0x15:
-            return set_delay_timer();
-          case 0x18:
-            return set_sound_timer();
-          case 0x1e:
-            return add_addr();
-          case 0x29:
-            return load_sprite_addr();
-          case 0x33:
-            return store_bcd();
-          case 0x55:
-            return save_registers();
-          case 0x65:
-            return restore_registers();
-          default:
-            break; // fall through to outer default -> ERROR
-          }
-        __attribute__((fallthrough));
+	switch (op & 0x00ff)
+	  {
+	  case 0x07:
+	    return get_delay_timer ();
+	  case 0x0a:
+	    return load_on_key ();
+	  case 0x15:
+	    return set_delay_timer ();
+	  case 0x18:
+	    return set_sound_timer ();
+	  case 0x1e:
+	    return add_addr ();
+	  case 0x29:
+	    return load_sprite_addr ();
+	  case 0x33:
+	    return store_bcd ();
+	  case 0x55:
+	    return save_registers ();
+	  case 0x65:
+	    return restore_registers ();
+	  default:
+	    break;		// fall through to outer default -> ERROR
+	  }
+	__attribute__((fallthrough));
       }
       // fall through
     default:
@@ -609,55 +665,56 @@ uint32_t basic_block()
 // ------------------------------------------------------------------------
 
 #ifndef CHIP8_RUNTIME
-int main(int argc, const char * argv[])
+int
+main (int argc, const char *argv[])
 {
-  FILE * fp;
+  FILE *fp;
   int inst_count = 0;
   const char *rom;
 
 #ifdef BENCH
-  if (bench_parse_args(argc, argv, &rom) != 0)
+  if (bench_parse_args (argc, argv, &rom) != 0)
     {
-      exit(-1);
+      exit (-1);
     }
 #else
   if (argc <= 1)
     {
-      fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
-      exit(-1);
+      fprintf (stderr, "Usage: %s <rom>\n", argv[0]);
+      exit (-1);
     }
   rom = argv[1];
 #endif
 
   // load
-  fp = fopen(rom, "rb");
+  fp = fopen (rom, "rb");
   if (fp == NULL)
     {
-      fprintf(stderr, "Could not open ROM %s\n", rom);
-      exit(-1);
+      fprintf (stderr, "Could not open ROM %s\n", rom);
+      exit (-1);
     }
-  if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
+  if (fread (memory + ENTRYPOINT, sizeof (uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
     {
-      fprintf(stderr, "Could not read ROM\n");
-      fclose(fp);
-      exit(-1);
+      fprintf (stderr, "Could not read ROM\n");
+      fclose (fp);
+      exit (-1);
     }
-  fclose(fp);
+  fclose (fp);
 
   // initialize
-  last_tick = tick();
-  init_chip8();
-  init_io(64, 32);
+  last_tick = tick ();
+  init_chip8 ();
+  init_io (64, 32);
 
   // transfer
   program_counter = ENTRYPOINT;
   while (1)
     {
       /* interrupt(); */
-      if (all_keys_down() & (1<<31))
-        {
-          break;
-        }
+      if (all_keys_down () & (1 << 31))
+	{
+	  break;
+	}
 #ifdef BENCH
       // Count before executing, exactly as the JITs' emitted accounting does:
       // an instruction that reads a timer must see the same virtual clock in
@@ -665,28 +722,28 @@ int main(int argc, const char * argv[])
       // far side of a tick boundary.
       ++bench_retired;
 #endif
-      if (basic_block())
-        {
-          break;
-        }
+      if (basic_block ())
+	{
+	  break;
+	}
       inst_count++;
 #ifdef BENCH
-      if (bench_done())
-        {
-          break;
-        }
+      if (bench_done ())
+	{
+	  break;
+	}
 #endif
     }
 
-  deinit_io();
-  deinit_chip8();
+  deinit_io ();
+  deinit_chip8 ();
 
 #ifdef BENCH
-  bench_report("interp", "chip-8 instructions", inst_count);
+  bench_report ("interp", "chip-8 instructions", inst_count);
 #else
-  dump_chip8_state("chip-8 instructions", inst_count);
+  dump_chip8_state ("chip-8 instructions", inst_count);
 #endif
 
-  exit(0);
+  exit (0);
 }
 #endif /* CHIP8_RUNTIME */

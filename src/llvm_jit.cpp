@@ -53,10 +53,10 @@
 #define IMMEDIATE4 uint8_t immediate = op & 0xf
 #define IMMEDIATE8 uint8_t immediate = op & 0xff
 #define IMMEDIATE12 uint16_t immediate = op & 0xfff
-#define NANOS_PER_TICK (16666666) // ~60 Hz clock
-#define TICKS_PER_SECOND (60) // ~60 Hz clock
-#define INPUT_TICKS (10) // roughly 1/6 second window for input
-#define SAFEPOINT_INTERVAL (32) // straight-line ops between emitted safepoints
+#define NANOS_PER_TICK (16666666)	// ~60 Hz clock
+#define TICKS_PER_SECOND (60)	// ~60 Hz clock
+#define INPUT_TICKS (10)	// roughly 1/6 second window for input
+#define SAFEPOINT_INTERVAL (32)	// straight-line ops between emitted safepoints
 
 // ------------------------------------------------------------------------
 
@@ -208,7 +208,8 @@ static uint8_t code_bytes[MEMORY_SIZE];
 // a peephole folds in (the skip+jump fusion reads the instruction after the
 // skip). Anything the compiler baked into native code must be covered here, or
 // a write over it will go unnoticed.
-static void mark_code(uint16_t a, unsigned n)
+static void
+mark_code (uint16_t a, unsigned n)
 {
   for (unsigned i = 0; i < n; ++i)
     code_bytes[(a + i) & (MEMORY_SIZE - 1)] = 1;
@@ -216,13 +217,14 @@ static void mark_code(uint16_t a, unsigned n)
 
 // Raise smc_pending only if [a, a+n) overlaps a byte some live trace was
 // compiled from.
-static void note_store(uint16_t a, unsigned n)
+static void
+note_store (uint16_t a, unsigned n)
 {
   for (unsigned i = 0; i < n; ++i)
     if (code_bytes[(a + i) & (MEMORY_SIZE - 1)])
       {
-        smc_pending = 1;
-        return;
+	smc_pending = 1;
+	return;
       }
 }
 
@@ -231,21 +233,21 @@ static void note_store(uint16_t a, unsigned n)
 // is not async-signal-safe, so the actual polling happens synchronously in
 // check_interrupt() at safepoints emitted into the JITed traces).
 volatile sig_atomic_t interrupt_pending = 0;
-static_assert(sizeof(sig_atomic_t) == sizeof(int32_t),
-              "JIT_SAFEPOINT emits a 32-bit load of interrupt_pending");
-static_assert(sizeof(program_over) == 1,
-              "JIT_CLOSE_BACKEDGE emits an 8-bit load of program_over");
+static_assert (sizeof (sig_atomic_t) == sizeof (int32_t), "JIT_SAFEPOINT emits a 32-bit load of interrupt_pending");
+static_assert (sizeof (program_over) == 1, "JIT_CLOSE_BACKEDGE emits an 8-bit load of program_over");
 #ifndef BENCH
 static timer_t interrupt_timer;
 
-static void alarm_handler(int signum)
+static void
+alarm_handler (int signum)
 {
-  (void)signum;
+  (void) signum;
   interrupt_pending = 1;
 }
 #endif
 
-static void init_interrupt_timer()
+static void
+init_interrupt_timer ()
 {
 #ifdef BENCH
   interrupt_pending = 0;
@@ -255,75 +257,82 @@ static void init_interrupt_timer()
   struct sigevent sev;
   struct itimerspec its;
 
-  memset(&sa, 0, sizeof(sa));
+  memset (&sa, 0, sizeof (sa));
   sa.sa_handler = alarm_handler;
-  sigemptyset(&sa.sa_mask);
+  sigemptyset (&sa.sa_mask);
   sa.sa_flags = SA_RESTART;
-  sigaction(SIGALRM, &sa, NULL);
+  sigaction (SIGALRM, &sa, NULL);
 
-  memset(&sev, 0, sizeof(sev));
+  memset (&sev, 0, sizeof (sev));
   sev.sigev_notify = SIGEV_SIGNAL;
   sev.sigev_signo = SIGALRM;
-  timer_create(CLOCK_MONOTONIC, &sev, &interrupt_timer);
+  timer_create (CLOCK_MONOTONIC, &sev, &interrupt_timer);
 
   its.it_interval.tv_sec = 0;
   its.it_interval.tv_nsec = NANOS_PER_TICK / INPUT_TICKS;
   its.it_value = its.it_interval;
-  timer_settime(interrupt_timer, 0, &its, NULL);
+  timer_settime (interrupt_timer, 0, &its, NULL);
 #endif
 }
 
-static void deinit_interrupt_timer()
+static void
+deinit_interrupt_timer ()
 {
 #ifndef BENCH
-  timer_delete(interrupt_timer);
+  timer_delete (interrupt_timer);
 #endif
 }
 
-typedef void (*code)(void);  // function pointer typedef
-std::unique_ptr<std::map<uint16_t, code>> trace_cache;
-std::vector<llvm::orc::ResourceTrackerSP> trace_resources;
+typedef void (*code) (void);	// function pointer typedef
+std::unique_ptr < std::map < uint16_t, code >> trace_cache;
+std::vector < llvm::orc::ResourceTrackerSP > trace_resources;
 llvm::ExitOnError ExitOnErr;
 
 // ------------------------------------------------------------------------
 
-extern "C"
+extern
+  "C"
 {
-  void clear_key(uint8_t key)
+  void
+  clear_key (uint8_t key)
   {
 #ifdef BENCH
-    bench_clear_key(key);
+    bench_clear_key (key);
 #else
     for (int i = 0; i < INPUT_TICKS; ++i)
       {
-        keys_down[i] &= ~(1u << key);
+	keys_down[i] &= ~(1u << key);
       }
 #endif
   }
 
-  uint32_t all_keys_down()
+  uint32_t
+  all_keys_down ()
   {
 #ifdef BENCH
-    return bench_keys_now();
+    return bench_keys_now ();
 #else
-    uint32_t all_keys = 0;
+    uint32_t
+      all_keys = 0;
 
     for (int i = 0; i < INPUT_TICKS; ++i)
       {
-        all_keys |= keys_down[i];
+	all_keys |= keys_down[i];
       }
     return all_keys;
 #endif
   }
 
-  int tick()
+  int
+  tick ()
   {
 #ifdef BENCH
-    return bench_tick();
+    return bench_tick ();
 #else
-    struct timespec spec;
+    struct timespec
+      spec;
 
-    clock_gettime(CLOCK_MONOTONIC, &spec);
+    clock_gettime (CLOCK_MONOTONIC, &spec);
     return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
 #endif
   }
@@ -333,40 +342,45 @@ extern "C"
   // is read or written, so the value observed depends only on how many
   // instructions have retired -- not on how often this engine happens to
   // service interrupts, which differs between the interpreter and the JITs.
-  void sync_timers()
+  void
+  sync_timers ()
   {
-    int now = tick();
-    int elapsed = now - last_tick;
+    int
+      now = tick ();
+    int
+      elapsed = now - last_tick;
 
     if (elapsed > 0)
       {
-        delay_timer = (delay_timer > elapsed) ? (uint8_t)(delay_timer - elapsed) : 0;
-        sound_timer = (sound_timer > elapsed) ? (uint8_t)(sound_timer - elapsed) : 0;
-        last_tick = now;
+	delay_timer = (delay_timer > elapsed) ? (uint8_t) (delay_timer - elapsed) : 0;
+	sound_timer = (sound_timer > elapsed) ? (uint8_t) (sound_timer - elapsed) : 0;
+	last_tick = now;
       }
   }
 #endif
 
-  void interrupt()
+  void
+  interrupt ()
   {
 #ifdef BENCH
-    sync_timers(); // keys are polled on demand, not ringed
+    sync_timers ();		// keys are polled on demand, not ringed
 #else
-    int current_tick = tick();
+    int
+      current_tick = tick ();
 
     if (current_tick != last_tick)
       {
-        if (delay_timer > 0)
-          {
-            --delay_timer;
-          }
-        if (sound_timer > 0)
-          {
-            --sound_timer;
-          }
-        last_tick = current_tick;
+	if (delay_timer > 0)
+	  {
+	    --delay_timer;
+	  }
+	if (sound_timer > 0)
+	  {
+	    --sound_timer;
+	  }
+	last_tick = current_tick;
       }
-    keys_down[interrupt_count] = read_keys_io();
+    keys_down[interrupt_count] = read_keys_io ();
     interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
 #endif
   }
@@ -374,219 +388,241 @@ extern "C"
   // Slow path of a safepoint: service timers and input iff the asynchronous
   // timer has fired since the last check. Cheap enough to call from the
   // dispatch loop and from any host helper.
-  void check_interrupt()
+  void
+  check_interrupt ()
   {
 #ifdef BENCH
-    interrupt();
-    if (bench_done())
+    interrupt ();
+    if (bench_done ())
       {
-        program_over = true;
+	program_over = true;
       }
 #else
     if (interrupt_pending)
       {
-        interrupt_pending = 0;
-        interrupt();
-        // The dispatcher observes the quit key between traces, which was every
-        // loop iteration back when a back-edge returned. Traces now close their
-        // own loops, so a spin loop need never come back -- the quit key has to
-        // be observed here too, or it would be ignored until the loop exits.
-        if (all_keys_down() & (1u << 31))
-          {
-            program_over = true;
-          }
+	interrupt_pending = 0;
+	interrupt ();
+	// The dispatcher observes the quit key between traces, which was every
+	// loop iteration back when a back-edge returned. Traces now close their
+	// own loops, so a spin loop need never come back -- the quit key has to
+	// be observed here too, or it would be ignored until the loop exits.
+	if (all_keys_down () & (1u << 31))
+	  {
+	    program_over = true;
+	  }
       }
 #endif
   }
 
 #ifdef BENCH
-  void bench_safepoint()
+  void
+  bench_safepoint ()
   {
-    check_interrupt();
-    bench_advance_safepoint();
+    check_interrupt ();
+    bench_advance_safepoint ();
   }
 #endif
 
-  void errer()
+  void
+  errer ()
   {
-    fprintf(stderr, "Error: op=%04x pc=%04x\n", op, program_counter);
-    exit(-1);
+    fprintf (stderr, "Error: op=%04x pc=%04x\n", op, program_counter);
+    exit (-1);
   }
 
-  void retern()
+  void
+  retern ()
   {
-    check_interrupt();
+    check_interrupt ();
     if (stack_pointer > 0)
       {
-        program_counter = stack[--stack_pointer];
+	program_counter = stack[--stack_pointer];
       }
     else
       ERROR;
   }
 
-  void call()
+  void
+  call ()
   {
     OP;
     IMMEDIATE12;
 
-    check_interrupt();
+    check_interrupt ();
     if (stack_pointer < STACK_SIZE)
       {
-        stack[stack_pointer++] = program_counter + 2;
-        program_counter = immediate;
+	stack[stack_pointer++] = program_counter + 2;
+	program_counter = immediate;
       }
     else
       ERROR;
   }
 
-  void random_byte()
+  void
+  random_byte ()
   {
     OP;
     X;
     IMMEDIATE8;
 
-    regs[x] = rand() & 0xff & immediate;
+    regs[x] = rand () & 0xff & immediate;
   }
 
-  void store_bcd()
+  void
+  store_bcd ()
   {
     OP;
     X;
-    note_store(addr, 3);
-    uint8_t tmp = regs[x];
-    uint8_t hundreds, tens;
+    note_store (addr, 3);
+    uint8_t
+      tmp = regs[x];
+    uint8_t
+      hundreds,
+      tens;
 
     hundreds = tmp / 100;
     tmp %= 100;
     tens = tmp / 10;
     tmp %= 10;
-    MEM_AT(addr+0) = hundreds;
-    MEM_AT(addr+1) = tens;
-    MEM_AT(addr+2) = tmp;
+    MEM_AT (addr + 0) = hundreds;
+    MEM_AT (addr + 1) = tens;
+    MEM_AT (addr + 2) = tmp;
     program_counter += 2;
   }
 
-  void skip_key_x(int up)
+  void
+  skip_key_x (int up)
   {
     OP;
     X;
 
-    if (((all_keys_down() & (1<<(regs[x]))) != 0) ^ up)
+    if (((all_keys_down () & (1 << (regs[x]))) != 0) ^ up)
       {
-        clear_key(regs[x]);
-        program_counter+=2;
+	clear_key (regs[x]);
+	program_counter += 2;
       }
     STEP;
   }
 
-  void skip_key_x_up()
+  void
+  skip_key_x_up ()
   {
-    skip_key_x(1);
+    skip_key_x (1);
   }
 
-  void skip_key_x_down()
+  void
+  skip_key_x_down ()
   {
-    skip_key_x(0);
+    skip_key_x (0);
   }
 
-  void load_on_key()
+  void
+  load_on_key ()
   {
     OP;
     X;
-    uint32_t all_keys = 0;
+    uint32_t
+      all_keys = 0;
 
     do
       {
 #ifdef BENCH
-        // Polling charges the virtual clock, so the synthetic keyboard always
-        // delivers eventually; bail out if the run is over regardless
-        // (--keys none never produces one).
-        all_keys = read_keys_io();
-        if (bench_done())
-          {
-            program_over = true;
-            break;
-          }
+	// Polling charges the virtual clock, so the synthetic keyboard always
+	// delivers eventually; bail out if the run is over regardless
+	// (--keys none never produces one).
+	all_keys = read_keys_io ();
+	if (bench_done ())
+	  {
+	    program_over = true;
+	    break;
+	  }
 #else
-        usleep(10);
-        all_keys = read_keys_io();
+	usleep (10);
+	all_keys = read_keys_io ();
 #endif
-      } while((all_keys) == 0);
+      }
+    while ((all_keys) == 0);
 
     for (int i = 0; i < 16; ++i)
       {
-        clear_key(i);
-        if (all_keys & (1<<i))
-          {
-            regs[x] = i;
-          }
+	clear_key (i);
+	if (all_keys & (1 << i))
+	  {
+	    regs[x] = i;
+	  }
       }
 
-    if (all_keys & (1<<31))
+    if (all_keys & (1 << 31))
       {
-        ERROR;
+	ERROR;
       }
     else
       {
-        STEP;
+	STEP;
       }
   }
 
-  void draw()
+  void
+  draw ()
   {
     OP;
     X;
     Y;
     IMMEDIATE4;
-    int current_tick;
+    int
+      current_tick;
 
-    check_interrupt();
-    uint8_t sprite[16];
+    check_interrupt ();
+    uint8_t
+      sprite[16];
     for (int i = 0; i < immediate; ++i)
       {
-        sprite[i] = MEM_AT(addr+i);
+	sprite[i] = MEM_AT (addr + i);
       }
-    FLAGS = draw_io(regs[x], regs[y], immediate, sprite);
+    FLAGS = draw_io (regs[x], regs[y], immediate, sprite);
 #ifndef BENCH
     // Frame sync: hold the draw until the 60 Hz tick rolls over. Skipped in
     // bench mode -- there is no display to pace, and blocking on a clock that
     // only advances with retired instructions would deadlock.
-    while((current_tick = tick()) == last_tick)
+    while ((current_tick = tick ()) == last_tick)
       {
-        usleep(NANOS_PER_TICK>>10);
+	usleep (NANOS_PER_TICK >> 10);
       }
     last_tick = current_tick;
 #else
-    (void)current_tick;
+    (void) current_tick;
 #endif
-    refresh_io();
+    refresh_io ();
   }
 
-  void save_registers()
+  void
+  save_registers ()
   {
     OP;
     X;
-    note_store(addr, x + 1);
+    note_store (addr, x + 1);
 
     for (int i = 0; i <= x; ++i)
       {
-        MEM_AT(addr+i) = regs[i];
+	MEM_AT (addr + i) = regs[i];
       }
     program_counter += 2;
   }
 
-  void restore_registers()
+  void
+  restore_registers ()
   {
     OP;
     X;
 
     for (int i = 0; i <= x; ++i)
       {
-        regs[i] = MEM_AT(addr+i);
+	regs[i] = MEM_AT (addr + i);
       }
   }
 
-  void load_sprite_addr()
+  void
+  load_sprite_addr ()
   {
     OP;
     X;
@@ -595,9 +631,11 @@ extern "C"
     STEP;
   }
 
-  void load_addr_immediate()
+  void
+  load_addr_immediate ()
   {
-    OP; IMMEDIATE12;
+    OP;
+    IMMEDIATE12;
 
     addr = immediate;
     STEP;
@@ -606,16 +644,26 @@ extern "C"
 
 // ------------------------------------------------------------------------
 
-code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
+code
+codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 {
-  char fn_name[16];
-  sprintf(fn_name, "ADDR%0X", program_counter);
-  auto context = std::make_unique<llvm::LLVMContext>();
-  auto module = std::make_unique<llvm::Module>("CHIP-8", *context);
-  auto fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*context), {}, false);
-  auto builder = std::make_unique<llvm::IRBuilder<>>(*context);
-  auto linkage = llvm::Function::ExternalLinkage;
-  auto function = llvm::Function::Create(fn_type, linkage, fn_name, *module);
+  char
+    fn_name[16];
+  sprintf (fn_name, "ADDR%0X", program_counter);
+  auto
+    context = std::make_unique < llvm::LLVMContext > ();
+  auto
+    module = std::make_unique < llvm::Module > ("CHIP-8", *context);
+  auto
+    fn_type = llvm::FunctionType::get (llvm::Type::getVoidTy (*context),
+				       {
+				       }, false);
+  auto
+    builder = std::make_unique < llvm::IRBuilder <>> (*context);
+  auto
+    linkage = llvm::Function::ExternalLinkage;
+  auto
+    function = llvm::Function::Create (fn_type, linkage, fn_name, *module);
 
   // https://llvm.org/docs/NewPassManager.html
   llvm::LoopAnalysisManager LAM;
@@ -623,635 +671,773 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   llvm::CGSCCAnalysisManager CGAM;
   llvm::ModuleAnalysisManager MAM;
   llvm::PassBuilder PB;
-  PB.registerModuleAnalyses(MAM);
-  PB.registerCGSCCAnalyses(CGAM);
-  PB.registerFunctionAnalyses(FAM);
-  PB.registerLoopAnalyses(LAM);
-  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+  PB.registerModuleAnalyses (MAM);
+  PB.registerCGSCCAnalyses (CGAM);
+  PB.registerFunctionAnalyses (FAM);
+  PB.registerLoopAnalyses (LAM);
+  PB.crossRegisterProxies (LAM, FAM, CGAM, MAM);
+  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline (llvm::OptimizationLevel::O2);
 
-  llvm::BasicBlock * basic_block = llvm::BasicBlock::Create(*context, "", function);
-  builder->SetInsertPoint(basic_block);
+  llvm::BasicBlock * basic_block = llvm::BasicBlock::Create (*context, "", function);
+  builder->SetInsertPoint (basic_block);
 
   // The block each CHIP-8 address was emitted into, for this trace only. A
   // jump whose target is already in here is a back edge into code we have
   // compiled, and can be closed as a branch; anything else still ends the
   // trace. Straight-line blocks cost nothing -- both backends fold them away.
-  std::vector<llvm::BasicBlock *> pc_block(MEMORY_SIZE, nullptr);
+  std::vector < llvm::BasicBlock * >pc_block (MEMORY_SIZE, nullptr);
 
-  for(uint16_t pc = program_counter, op_count=0; ; pc+=2, ++op_count)
-  {
-    op = OPCODE_AT(pc);
-    mark_code(pc, 2);
+  for (uint16_t pc = program_counter, op_count = 0;; pc += 2, ++op_count)
+    {
+      op = OPCODE_AT (pc);
+      mark_code (pc, 2);
 
-    if (pc_block[pc] != nullptr)
+      if (pc_block[pc] != nullptr)
+	{
+	  // Fell through onto an address this trace already compiled. Close the
+	  // loop rather than emit it twice; the safepoint keeps input and timers
+	  // serviced once per iteration, exactly as the jump case does.
+	  JIT_SAFEPOINT;
+	  JIT_GETPTR16 (program_counter);
+	  builder->CreateStore (builder->getInt16 (pc), JIT_PTR (program_counter));
+	  JIT_CLOSE_BACKEDGE (pc_block[pc]);
+	  goto trace_terminated;
+	}
+
       {
-        // Fell through onto an address this trace already compiled. Close the
-        // loop rather than emit it twice; the safepoint keeps input and timers
-        // serviced once per iteration, exactly as the jump case does.
-        JIT_SAFEPOINT;
-        JIT_GETPTR16(program_counter);
-        builder->CreateStore(builder->getInt16(pc), JIT_PTR(program_counter));
-        JIT_CLOSE_BACKEDGE(pc_block[pc]);
-        goto trace_terminated;
+	// One block per instruction, so that any address in the trace is a
+	// branch target.
+	auto
+	  pc_blk = llvm::BasicBlock::Create (*context, "", function);
+	builder->CreateBr (pc_blk);
+	basic_block = pc_blk;
+	builder->SetInsertPoint (basic_block);
+	pc_block[pc] = pc_blk;
       }
 
-    {
-      // One block per instruction, so that any address in the trace is a
-      // branch target.
-      auto pc_blk = llvm::BasicBlock::Create(*context, "", function);
-      builder->CreateBr(pc_blk);
-      basic_block = pc_blk;
-      builder->SetInsertPoint(basic_block);
-      pc_block[pc] = pc_blk;
+      // Periodic safepoint: bound the number of straight-line (or taken-skip)
+      // instructions that can execute between input/timer checks.
+      if ((op_count != 0) && ((op_count % SAFEPOINT_INTERVAL) == 0))
+	{
+	  JIT_SAFEPOINT;
+	}
+
+      JIT_RETIRE (1);
+
+      if (op == 0x00e0)
+	{			// clear
+	  JIT_CALL ("clearscreen_io");
+	  JIT_STEP;
+	}
+      else if (op == 0x00ee)
+	{
+	  JIT_CALL ("retern");
+	  JIT_DONE;
+	}
+
+      switch ((op & 0xf000) >> 12)
+	{
+	case 0x0:
+	case 0x1:
+	  {			// jump
+	    IMMEDIATE12;
+	    JIT_IMM16;
+	    JIT_SAFEPOINT;
+	    JIT_GETPTR16 (program_counter);
+	    builder->CreateStore (JIT_VALUE (immediate), JIT_PTR (program_counter));
+	    if (pc_block[immediate] != nullptr)
+	      {
+		// Back edge into this trace -- including the self-loop
+		// `JP self`. Branch to the block instead of returning: the whole
+		// loop now runs as one native loop, where it used to cost a
+		// dispatcher round trip (and, for a self-loop, a trace-cache
+		// lookup) on every single iteration.
+		JIT_CLOSE_BACKEDGE (pc_block[immediate]);
+		goto trace_terminated;
+	      }
+	    if (op_count < (1 << 8))
+	      {
+		pc = immediate - 2;
+		continue;
+	      }
+	    else
+	      {
+		JIT_DONE;
+	      }
+	  }
+	case 0x2:
+	  {
+	    JIT_CALL_OP ("call");
+	    JIT_DONE;
+	  }
+	case 0x3:		// skip_eq_immediate
+	case 0x4:		// skip_neq_immediate
+	case 0x5:		// skip_eq_register
+	case 0x9:		// skip_neq_register
+	  {
+	    JIT_GETPTR16 (program_counter);
+
+	    // CHIP-8 has no conditional branch: every one is written as a skip
+	    // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
+	    // when the skip is not taken". Fuse the pair into a single
+	    // conditional branch, sending the not-taken edge straight to NNN
+	    // rather than stepping past the skip and bouncing to the dispatcher
+	    // only to run a jump. The skipped opcode is read at compile time,
+	    // which is what trace extension already assumes, so it is marked as
+	    // code below: a ROM that writes over it raises smc_pending and the
+	    // cache is discarded.
+	    uint16_t
+	      fused_op = OPCODE_AT ((uint16_t) (pc + 2));
+	    mark_code ((uint16_t) (pc + 2), 2);
+	    bool
+	      fused = ((fused_op & 0xf000) == 0x1000);
+	    uint16_t
+	      fused_target = fused_op & 0x0fff;
+
+	    // Generate comparison
+	    auto
+	      then_block = llvm::BasicBlock::Create (*context, "", function);
+	    auto
+	      else_block = llvm::BasicBlock::Create (*context, "", function);
+	    llvm::CmpInst::Predicate pred = llvm::CmpInst::Predicate::ICMP_EQ;
+	    switch ((op & 0xf000) >> 12)
+	      {
+	      case 0x3:
+	      case 0x5:
+		pred = llvm::CmpInst::Predicate::ICMP_EQ;
+		break;
+	      case 0x4:
+	      case 0x9:
+		pred = llvm::CmpInst::Predicate::ICMP_NE;
+		break;
+	      }
+	    switch ((op & 0xf000) >> 12)
+	      {
+	      case 0x3:
+	      case 0x4:
+		{
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  IMMEDIATE8;
+		  JIT_IMM8;
+		  auto
+		    cond = builder->CreateCmp (pred, JIT_VALUE (x), JIT_VALUE (immediate));
+		  builder->CreateCondBr (cond, then_block, else_block);
+		  break;
+		}
+	      case 0x5:
+	      case 0x9:
+		{
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    cond = builder->CreateCmp (pred, JIT_VALUE (x), JIT_VALUE (y));
+		  builder->CreateCondBr (cond, then_block, else_block);
+		  break;
+		}
+	      }
+
+	    // "else" (don't skip) block
+	    builder->SetInsertPoint (else_block);
+	    if (fused)
+	      {
+		// The jump is folded in: land on NNN directly. These edges are
+		// usually loop back-edges, so they keep the safepoint the jump
+		// itself would have emitted.
+		basic_block = else_block;
+		JIT_RETIRE (1);	// the folded 1NNN still retires
+		JIT_SAFEPOINT;
+		builder->CreateStore (builder->getInt16 (fused_target), JIT_PTR (program_counter));	// set VM pc
+		if (pc_block[fused_target] != nullptr)
+		  {
+		    // The fused edge is a loop back-edge, which is what this
+		    // shape almost always is: `skip ; JP top` is how CHIP-8
+		    // spells "loop while". Close it.
+		    JIT_CLOSE_BACKEDGE (pc_block[fused_target]);
+		  }
+		else
+		  {
+		    JIT_RETURN;	// return control
+		  }
+	      }
+	    else
+	      {
+		builder->CreateStore (builder->getInt16 ((uint16_t) (pc + 2)), JIT_PTR (program_counter));	// set VM pc
+		JIT_RETURN;	// return control
+	      }
+
+	    // "then" (do skip) block
+	    basic_block = then_block;
+	    builder->SetInsertPoint (basic_block);
+	    builder->CreateStore (builder->getInt16 ((uint16_t) (pc + 4)), JIT_PTR (program_counter));	// set VM pc
+	    pc += 2;		// skip next instruction
+	    continue;		// continue JITing along this path
+	  }
+	case 0x6:
+	  {			// load_immediate
+	    X;
+	    JIT_GETPTRREG (x);
+	    IMMEDIATE8;
+	    JIT_IMM8;
+	    builder->CreateStore (JIT_VALUE (immediate), JIT_PTR (x));
+	    JIT_STEP;
+	  }
+	case 0x7:
+	  {			// add_immediate
+	    X;
+	    JIT_GETPTRREG (x);
+	    JIT_LOADREG (x);
+	    IMMEDIATE8;
+	    JIT_IMM8;
+	    auto
+	      sum_value = builder->CreateAdd (JIT_VALUE (x), JIT_VALUE (immediate));
+	    builder->CreateStore (sum_value, JIT_PTR (x));
+	    JIT_STEP;
+	  }
+	case 0x8:
+	  {
+	    switch (op & 0x000f)
+	      {
+	      case 0x0:
+		{		// move
+		  X;
+		  JIT_GETPTRREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  builder->CreateStore (JIT_VALUE (y), JIT_PTR (x));
+		  JIT_STEP;
+		}
+	      case 0x1:
+		{		// or_op
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    or_value = builder->CreateOr (JIT_VALUE (x), JIT_VALUE (y));
+		  builder->CreateStore (or_value, JIT_PTR (x));
+		  JIT_STEP;
+		}
+	      case 0x2:
+		{		// and_op
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    and_value = builder->CreateAnd (JIT_VALUE (x), JIT_VALUE (y));
+		  builder->CreateStore (and_value, JIT_PTR (x));
+		  JIT_STEP;
+		}
+	      case 0x3:
+		{		// xor_op
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    xor_value = builder->CreateXor (JIT_VALUE (x), JIT_VALUE (y));
+		  builder->CreateStore (xor_value, JIT_PTR (x));
+		  JIT_STEP;
+		}
+	      case 0x4:
+		{		// add_register
+		  auto
+		    int16ty = llvm::Type::getInt16Ty (*context);
+		  auto
+		    int8ty = llvm::Type::getInt8Ty (*context);
+		  int
+		    f = 0xf;
+		  JIT_GETPTRREG (f);	// flags
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
+		  auto
+		    y16_value = builder->CreateZExt (JIT_VALUE (y), int16ty);
+		  auto
+		    eff_eff = builder->getInt16 (0xff);
+		  auto
+		    sum16_value = builder->CreateAdd (x16_value, y16_value);
+		  auto
+		    cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_SGT, sum16_value, eff_eff);
+		  auto
+		    cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
+		  auto
+		    sum8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (sum16_value, false, int8ty, false), sum16_value, int8ty);
+		  builder->CreateStore (sum8_value, x_ptr);
+		  builder->CreateStore (cmp8_value, JIT_PTR (f));
+		  JIT_STEP;
+		}
+	      case 0x5:
+		{		// sub_register;
+		  auto
+		    int8ty = llvm::Type::getInt8Ty (*context);
+		  int
+		    f = 0xf;
+		  JIT_GETPTRREG (f);
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE (x), JIT_VALUE (y));
+		  auto
+		    cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
+		  auto
+		    diff_value = builder->CreateSub (JIT_VALUE (x), JIT_VALUE (y));
+		  builder->CreateStore (diff_value, JIT_PTR (x));
+		  builder->CreateStore (cmp8_value, JIT_PTR (f));
+		  JIT_STEP;
+		}
+	      case 0x6:
+		{		// shift_right
+		  auto
+		    int8ty = llvm::Type::getInt8Ty (*context);
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  int
+		    f = 0xf;
+		  JIT_GETPTRREG (f);
+		  auto
+		    andone_value = builder->CreateAnd (JIT_VALUE (x), 0x01);
+		  auto
+		    shr_value = builder->CreateLShr (JIT_VALUE (x), 1);
+		  auto
+		    shr8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (shr_value, false, int8ty, false), shr_value, int8ty);
+		  builder->CreateStore (shr8_value, JIT_PTR (x));
+		  builder->CreateStore (andone_value, JIT_PTR (f));
+		  JIT_STEP;
+		}
+	      case 0x7:
+		{		// subn_register
+		  auto
+		    int8ty = llvm::Type::getInt8Ty (*context);
+		  int
+		    f = 0xf;
+		  JIT_GETPTRREG (f);
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  Y;
+		  JIT_GETPTRREG (y);
+		  JIT_LOADREG (y);
+		  auto
+		    cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE (y), JIT_VALUE (x));
+		  auto
+		    cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
+		  auto
+		    diff_value = builder->CreateSub (JIT_VALUE (y), JIT_VALUE (x));
+		  builder->CreateStore (diff_value, JIT_PTR (x));
+		  builder->CreateStore (cmp8_value, JIT_PTR (f));
+		  JIT_STEP;
+		}
+	      case 0xe:
+		{		// shift_left
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  int
+		    f = 0xf;
+		  JIT_GETPTRREG (f);
+		  auto
+		    andeight_value = builder->CreateAnd (JIT_VALUE (x), 0x80);
+		  auto
+		    msb_value = builder->CreateLShr (andeight_value, 7);
+		  auto
+		    shl_value = builder->CreateShl (JIT_VALUE (x), 1);
+		  builder->CreateStore (shl_value, JIT_PTR (x));
+		  builder->CreateStore (msb_value, JIT_PTR (f));
+		  JIT_STEP;
+		}
+	      default:
+		fprintf (stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+		return nullptr;
+	      }
+	  }
+	case 0xa:
+	  {			//load_addr_immediate
+	    IMMEDIATE12;
+	    JIT_IMM16;
+	    JIT_GETPTR16 (addr);
+	    builder->CreateStore (JIT_VALUE (immediate), JIT_PTR (addr));
+	    JIT_STEP;
+	  }
+	case 0xb:
+	  {			// branch
+	    int
+	      z = 0;
+	    JIT_GETPTRREG (z);
+	    JIT_LOADREG (z);
+	    IMMEDIATE12;
+	    JIT_IMM16;
+	    JIT_GETPTR16 (program_counter);
+	    auto
+	      int16ty = llvm::Type::getInt16Ty (*context);
+	    auto
+	      z16_value = builder->CreateZExt (JIT_VALUE (z), int16ty);
+	    auto
+	      pc_value = builder->CreateAdd (JIT_VALUE (immediate), z16_value);
+	    builder->CreateStore (pc_value, JIT_PTR (program_counter));
+	    JIT_DONE;
+	  }
+	case 0xc:
+	  {
+	    JIT_CALL_OP ("random_byte");
+	    JIT_STEP;
+	  }
+	case 0xd:
+	  {
+	    JIT_CALL_OP ("draw");
+	    JIT_STEP;
+	  }
+	case 0xe:
+	  {
+	    switch (op & 0x00ff)
+	      {
+	      case 0x9e:
+		{
+		  JIT_CALL_OP ("skip_key_x_down");
+		  JIT_DONE;
+		}
+	      case 0xa1:
+		{
+		  JIT_CALL_OP ("skip_key_x_up");
+		  JIT_DONE;
+		}
+	      default:
+		fprintf (stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+		return nullptr;
+	      }
+	  }
+	case 0xf:
+	  {
+	    switch (op & 0x00ff)
+	      {
+	      case 0x07:
+		{		// get_delay_timer
+		  X;
+		  JIT_GETPTRREG (x);
+#ifdef BENCH
+		  {
+		    JIT_CALL ("sync_timers");
+		  }		// access the timer at the current clock
+#endif
+		  auto
+		  JIT_LOC (delay_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&delay_timer), false));
+		  auto
+		  JIT_PTR (delay_timer) = builder->CreateIntToPtr (JIT_LOC (delay_timer), llvm::PointerType::getUnqual (*context));
+		  auto
+		  JIT_VALUE (delay_timer) = builder->CreateLoad (llvm::Type::getInt8Ty (*context), JIT_PTR (delay_timer));
+		  builder->CreateStore (JIT_VALUE (delay_timer), JIT_PTR (x));
+		  JIT_STEP;
+		}
+	      case 0x0a:
+		{
+		  JIT_CALL_OP ("load_on_key");
+		  JIT_DONE;	// need to end trace here to check for program exit
+		}
+	      case 0x15:
+		{		// set_delay_timer
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+#ifdef BENCH
+		  {
+		    JIT_CALL ("sync_timers");
+		  }		// access the timer at the current clock
+#endif
+		  auto
+		  JIT_LOC (delay_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&delay_timer), false));
+		  auto
+		  JIT_PTR (delay_timer) = builder->CreateIntToPtr (JIT_LOC (delay_timer), llvm::PointerType::getUnqual (*context));
+		  builder->CreateStore (JIT_VALUE (x), JIT_PTR (delay_timer));
+		  JIT_STEP;
+		}
+	      case 0x18:
+		{		// set_sound_timer
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+#ifdef BENCH
+		  {
+		    JIT_CALL ("sync_timers");
+		  }		// access the timer at the current clock
+#endif
+		  auto
+		  JIT_LOC (sound_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&sound_timer), false));
+		  auto
+		  JIT_PTR (sound_timer) = builder->CreateIntToPtr (JIT_LOC (sound_timer), llvm::PointerType::getUnqual (*context));
+		  builder->CreateStore (JIT_VALUE (x), JIT_PTR (sound_timer));
+		  JIT_STEP;
+		}
+	      case 0x1e:
+		{		// add_addr
+		  auto
+		    int16ty = llvm::Type::getInt16Ty (*context);
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  JIT_GETPTR16 (addr);
+		  JIT_LOAD16 (addr);
+		  auto
+		    x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
+		  auto
+		    sum_value = builder->CreateAdd (JIT_VALUE (addr), x16_value);
+		  builder->CreateStore (sum_value, JIT_PTR (addr));
+		  JIT_STEP;
+		}
+	      case 0x29:
+		{		// load_sprite_addr
+		  auto
+		    int16ty = llvm::Type::getInt16Ty (*context);
+		  X;
+		  JIT_GETPTRREG (x);
+		  JIT_LOADREG (x);
+		  JIT_GETPTR16 (addr);
+		  auto
+		    five_value = builder->getInt16 (5);
+		  auto
+		    x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
+		  auto
+		    prod_value = builder->CreateMul (x16_value, five_value);
+		  builder->CreateStore (prod_value, JIT_PTR (addr));
+		  JIT_STEP;
+		}
+	      case 0x33:
+		{
+		  JIT_CALL_OP ("store_bcd");
+		  JIT_DONE;
+		}
+	      case 0x55:
+		{
+		  JIT_CALL_OP ("save_registers");
+		  JIT_DONE;
+		}
+	      case 0x65:
+		{
+		  JIT_CALL_OP ("restore_registers");
+		  JIT_STEP;
+		}
+	      default:
+		fprintf (stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+		return nullptr;
+	      }
+	    break;		// inner Fx switch done
+	  }
+	default:
+	  fprintf (stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
+	  return nullptr;
+	}
     }
 
-    // Periodic safepoint: bound the number of straight-line (or taken-skip)
-    // instructions that can execute between input/timer checks.
-    if ((op_count != 0) && ((op_count % SAFEPOINT_INTERVAL) == 0))
-      {
-        JIT_SAFEPOINT;
-      }
-
-    JIT_RETIRE(1);
-
-    if (op == 0x00e0)
-      { // clear
-        JIT_CALL("clearscreen_io");
-        JIT_STEP;
-      }
-    else if (op == 0x00ee)
-      {
-        JIT_CALL("retern");
-        JIT_DONE;
-      }
-
-    switch ((op & 0xf000) >> 12)
-      {
-      case 0x0:
-      case 0x1:
-        { // jump
-          IMMEDIATE12; JIT_IMM16;
-          JIT_SAFEPOINT;
-          JIT_GETPTR16(program_counter);
-          builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(program_counter));
-          if (pc_block[immediate] != nullptr)
-            {
-              // Back edge into this trace -- including the self-loop
-              // `JP self`. Branch to the block instead of returning: the whole
-              // loop now runs as one native loop, where it used to cost a
-              // dispatcher round trip (and, for a self-loop, a trace-cache
-              // lookup) on every single iteration.
-              JIT_CLOSE_BACKEDGE(pc_block[immediate]);
-              goto trace_terminated;
-            }
-          if (op_count < (1<<8))
-            {
-              pc = immediate-2;
-              continue;
-            }
-          else
-            {
-              JIT_DONE;
-            }
-        }
-      case 0x2:
-        {
-          JIT_CALL_OP("call");
-          JIT_DONE;
-        }
-      case 0x3: // skip_eq_immediate
-      case 0x4: // skip_neq_immediate
-      case 0x5: // skip_eq_register
-      case 0x9: // skip_neq_register
-        {
-          JIT_GETPTR16(program_counter);
-
-          // CHIP-8 has no conditional branch: every one is written as a skip
-          // over an unconditional jump, so `skip ; 1NNN` means "branch to NNN
-          // when the skip is not taken". Fuse the pair into a single
-          // conditional branch, sending the not-taken edge straight to NNN
-          // rather than stepping past the skip and bouncing to the dispatcher
-          // only to run a jump. The skipped opcode is read at compile time,
-          // which is what trace extension already assumes, so it is marked as
-          // code below: a ROM that writes over it raises smc_pending and the
-          // cache is discarded.
-          uint16_t fused_op = OPCODE_AT((uint16_t)(pc + 2));
-          mark_code((uint16_t)(pc + 2), 2);
-          bool fused = ((fused_op & 0xf000) == 0x1000);
-          uint16_t fused_target = fused_op & 0x0fff;
-
-          // Generate comparison
-          auto then_block = llvm::BasicBlock::Create(*context, "", function);
-          auto else_block = llvm::BasicBlock::Create(*context, "", function);
-          llvm::CmpInst::Predicate pred = llvm::CmpInst::Predicate::ICMP_EQ;
-          switch ((op & 0xf000) >> 12)
-            {
-            case 0x3:
-            case 0x5:
-              pred = llvm::CmpInst::Predicate::ICMP_EQ;
-              break;
-            case 0x4:
-            case 0x9:
-              pred = llvm::CmpInst::Predicate::ICMP_NE;
-              break;
-            }
-          switch ((op & 0xf000) >> 12)
-            {
-            case 0x3:
-            case 0x4:
-              {
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                IMMEDIATE8; JIT_IMM8;
-                auto cond = builder->CreateCmp(pred, JIT_VALUE(x), JIT_VALUE(immediate));
-                builder->CreateCondBr(cond, then_block, else_block);
-                break;
-              }
-            case 0x5:
-            case 0x9:
-              {
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto cond = builder->CreateCmp(pred, JIT_VALUE(x), JIT_VALUE(y));
-                builder->CreateCondBr(cond, then_block, else_block);
-                break;
-              }
-            }
-
-          // "else" (don't skip) block
-          builder->SetInsertPoint(else_block);
-          if (fused)
-            {
-              // The jump is folded in: land on NNN directly. These edges are
-              // usually loop back-edges, so they keep the safepoint the jump
-              // itself would have emitted.
-              basic_block = else_block;
-              JIT_RETIRE(1); // the folded 1NNN still retires
-              JIT_SAFEPOINT;
-              builder->CreateStore(builder->getInt16(fused_target),
-                                   JIT_PTR(program_counter)); // set VM pc
-              if (pc_block[fused_target] != nullptr)
-                {
-                  // The fused edge is a loop back-edge, which is what this
-                  // shape almost always is: `skip ; JP top` is how CHIP-8
-                  // spells "loop while". Close it.
-                  JIT_CLOSE_BACKEDGE(pc_block[fused_target]);
-                }
-              else
-                {
-                  JIT_RETURN; // return control
-                }
-            }
-          else
-            {
-              builder->CreateStore(builder->getInt16((uint16_t)(pc + 2)),
-                                   JIT_PTR(program_counter)); // set VM pc
-              JIT_RETURN; // return control
-            }
-
-          // "then" (do skip) block
-          basic_block = then_block;
-          builder->SetInsertPoint(basic_block);
-          builder->CreateStore(builder->getInt16((uint16_t)(pc + 4)),
-                               JIT_PTR(program_counter)); // set VM pc
-          pc+=2; // skip next instruction
-          continue; // continue JITing along this path
-        }
-      case 0x6:
-        { // load_immediate
-          X; JIT_GETPTRREG(x);
-          IMMEDIATE8; JIT_IMM8;
-          builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(x));
-          JIT_STEP;
-        }
-      case 0x7:
-        { // add_immediate
-          X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-          IMMEDIATE8; JIT_IMM8;
-          auto sum_value = builder->CreateAdd(JIT_VALUE(x), JIT_VALUE(immediate));
-          builder->CreateStore(sum_value, JIT_PTR(x));
-          JIT_STEP;
-        }
-      case 0x8:
-        {
-          switch (op & 0x000f)
-            {
-            case 0x0:
-              { // move
-                X; JIT_GETPTRREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                builder->CreateStore(JIT_VALUE(y), JIT_PTR(x));
-                JIT_STEP;
-              }
-            case 0x1:
-              { // or_op
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto or_value = builder->CreateOr(JIT_VALUE(x), JIT_VALUE(y));
-                builder->CreateStore(or_value, JIT_PTR(x));
-                JIT_STEP;
-              }
-            case 0x2:
-              { // and_op
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto and_value = builder->CreateAnd(JIT_VALUE(x), JIT_VALUE(y));
-                builder->CreateStore(and_value, JIT_PTR(x));
-                JIT_STEP;
-              }
-            case 0x3:
-              { // xor_op
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto xor_value = builder->CreateXor(JIT_VALUE(x), JIT_VALUE(y));
-                builder->CreateStore(xor_value, JIT_PTR(x));
-                JIT_STEP;
-              }
-            case 0x4:
-              { // add_register
-                auto int16ty = llvm::Type::getInt16Ty(*context);
-                auto int8ty = llvm::Type::getInt8Ty(*context);
-                int f = 0xf; JIT_GETPTRREG(f); // flags
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto x16_value = builder->CreateZExt(JIT_VALUE(x), int16ty);
-                auto y16_value = builder->CreateZExt(JIT_VALUE(y), int16ty);
-                auto eff_eff = builder->getInt16(0xff);
-                auto sum16_value = builder->CreateAdd(x16_value, y16_value);
-                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_SGT, sum16_value, eff_eff);
-                auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
-                auto sum8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(sum16_value, false, int8ty, false), sum16_value, int8ty);
-                builder->CreateStore(sum8_value, x_ptr);
-                builder->CreateStore(cmp8_value, JIT_PTR(f));
-                JIT_STEP;
-              }
-            case 0x5:
-              { // sub_register;
-                auto int8ty = llvm::Type::getInt8Ty(*context);
-                int f = 0xf; JIT_GETPTRREG(f);
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE(x), JIT_VALUE(y));
-                auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
-                auto diff_value = builder->CreateSub(JIT_VALUE(x), JIT_VALUE(y));
-                builder->CreateStore(diff_value, JIT_PTR(x));
-                builder->CreateStore(cmp8_value, JIT_PTR(f));
-                JIT_STEP;
-              }
-            case 0x6:
-              { // shift_right
-                auto int8ty = llvm::Type::getInt8Ty(*context);
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                int f = 0xf; JIT_GETPTRREG(f);
-                auto andone_value = builder->CreateAnd(JIT_VALUE(x), 0x01);
-                auto shr_value = builder->CreateLShr(JIT_VALUE(x), 1);
-                auto shr8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(shr_value, false, int8ty, false), shr_value, int8ty);
-                builder->CreateStore(shr8_value, JIT_PTR(x));
-                builder->CreateStore(andone_value, JIT_PTR(f));
-                JIT_STEP;
-              }
-            case 0x7:
-              { // subn_register
-                auto int8ty = llvm::Type::getInt8Ty(*context);
-                int f = 0xf; JIT_GETPTRREG(f);
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                Y; JIT_GETPTRREG(y); JIT_LOADREG(y);
-                auto cmp_value = builder->CreateCmp(llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE(y), JIT_VALUE(x));
-                auto cmp8_value = builder->CreateCast(llvm::CastInst::getCastOpcode(cmp_value, false, int8ty, false), cmp_value, int8ty);
-                auto diff_value = builder->CreateSub(JIT_VALUE(y), JIT_VALUE(x));
-                builder->CreateStore(diff_value, JIT_PTR(x));
-                builder->CreateStore(cmp8_value, JIT_PTR(f));
-                JIT_STEP;
-              }
-            case 0xe:
-              { // shift_left
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                int f = 0xf; JIT_GETPTRREG(f);
-                auto andeight_value = builder->CreateAnd(JIT_VALUE(x), 0x80);
-                auto msb_value = builder->CreateLShr(andeight_value, 7);
-                auto shl_value = builder->CreateShl(JIT_VALUE(x), 1);
-                builder->CreateStore(shl_value, JIT_PTR(x));
-                builder->CreateStore(msb_value, JIT_PTR(f));
-                JIT_STEP;
-              }
-            default:
-              fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
-              return nullptr;
-            }
-        }
-      case 0xa:
-        { //load_addr_immediate
-          IMMEDIATE12; JIT_IMM16;
-          JIT_GETPTR16(addr);
-          builder->CreateStore(JIT_VALUE(immediate), JIT_PTR(addr));
-          JIT_STEP;
-        }
-      case 0xb:
-        { // branch
-          int z = 0; JIT_GETPTRREG(z); JIT_LOADREG(z);
-          IMMEDIATE12; JIT_IMM16;
-          JIT_GETPTR16(program_counter);
-          auto int16ty = llvm::Type::getInt16Ty(*context);
-          auto z16_value = builder->CreateZExt(JIT_VALUE(z), int16ty);
-          auto pc_value = builder->CreateAdd(JIT_VALUE(immediate), z16_value);
-          builder->CreateStore(pc_value, JIT_PTR(program_counter));
-          JIT_DONE;
-        }
-      case 0xc:
-        {
-          JIT_CALL_OP("random_byte");
-          JIT_STEP;
-        }
-      case 0xd:
-        {
-          JIT_CALL_OP("draw");
-          JIT_STEP;
-        }
-      case 0xe:
-        {
-          switch (op & 0x00ff)
-            {
-            case 0x9e:
-              {
-                JIT_CALL_OP("skip_key_x_down");
-                JIT_DONE;
-              }
-            case 0xa1:
-              {
-                JIT_CALL_OP("skip_key_x_up");
-                JIT_DONE;
-              }
-            default:
-              fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
-              return nullptr;
-            }
-        }
-      case 0xf:
-        {
-          switch (op & 0x00ff)
-            {
-            case 0x07:
-              { // get_delay_timer
-                X; JIT_GETPTRREG(x);
-#ifdef BENCH
-                { JIT_CALL("sync_timers"); } // access the timer at the current clock
-#endif
-                auto JIT_LOC(delay_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&delay_timer), false));
-                auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::PointerType::getUnqual(*context));
-                auto JIT_VALUE(delay_timer) = builder->CreateLoad(llvm::Type::getInt8Ty(*context), JIT_PTR(delay_timer));
-                builder->CreateStore(JIT_VALUE(delay_timer), JIT_PTR(x));
-                JIT_STEP;
-              }
-            case 0x0a:
-              {
-                JIT_CALL_OP("load_on_key");
-                JIT_DONE; // need to end trace here to check for program exit
-              }
-            case 0x15:
-              { // set_delay_timer
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-#ifdef BENCH
-                { JIT_CALL("sync_timers"); } // access the timer at the current clock
-#endif
-                auto JIT_LOC(delay_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&delay_timer), false));
-                auto JIT_PTR(delay_timer) = builder->CreateIntToPtr(JIT_LOC(delay_timer), llvm::PointerType::getUnqual(*context));
-                builder->CreateStore(JIT_VALUE(x), JIT_PTR(delay_timer));
-                JIT_STEP;
-              }
-            case 0x18:
-              { // set_sound_timer
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-#ifdef BENCH
-                { JIT_CALL("sync_timers"); } // access the timer at the current clock
-#endif
-                auto JIT_LOC(sound_timer) = llvm::ConstantInt::get(*context, llvm::APInt(sizeof(uint8_t *)*8, reinterpret_cast<uint64_t>(&sound_timer), false));
-                auto JIT_PTR(sound_timer) = builder->CreateIntToPtr(JIT_LOC(sound_timer), llvm::PointerType::getUnqual(*context));
-                builder->CreateStore(JIT_VALUE(x), JIT_PTR(sound_timer));
-                JIT_STEP;
-              }
-            case 0x1e:
-              { // add_addr
-                auto int16ty = llvm::Type::getInt16Ty(*context);
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                JIT_GETPTR16(addr); JIT_LOAD16(addr);
-                auto x16_value = builder->CreateZExt(JIT_VALUE(x), int16ty);
-                auto sum_value = builder->CreateAdd(JIT_VALUE(addr), x16_value);
-                builder->CreateStore(sum_value, JIT_PTR(addr));
-                JIT_STEP;
-              }
-            case 0x29:
-              { // load_sprite_addr
-                auto int16ty = llvm::Type::getInt16Ty(*context);
-                X; JIT_GETPTRREG(x); JIT_LOADREG(x);
-                JIT_GETPTR16(addr);
-                auto five_value = builder->getInt16(5);
-                auto x16_value = builder->CreateZExt(JIT_VALUE(x), int16ty);
-                auto prod_value = builder->CreateMul(x16_value, five_value);
-                builder->CreateStore(prod_value, JIT_PTR(addr));
-                JIT_STEP;
-              }
-            case 0x33:
-              {
-                JIT_CALL_OP("store_bcd");
-                JIT_DONE;
-              }
-            case 0x55:
-              {
-                JIT_CALL_OP("save_registers");
-                JIT_DONE;
-              }
-            case 0x65:
-              {
-                JIT_CALL_OP("restore_registers");
-                JIT_STEP;
-              }
-            default:
-              fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
-              return nullptr;
-            }
-          break; // inner Fx switch done
-        }
-      default:
-        fprintf(stderr, "JIT codegen failed: op=%04x pc=%04x\n", op, pc);
-        return nullptr;
-      }
-  }
-
- end_of_trace:
+end_of_trace:
   JIT_RETURN;
- trace_terminated: // the current block was already terminated by a closed back edge
+trace_terminated:		// the current block was already terminated by a closed back edge
 
   // An opt-in trace dump is the microscope for code-generator experiments.
   // Restrict it to the entry trace, otherwise a benchmark produces a lot of
   // IR rather than evidence.
-  const char *dump_ir_pc = getenv("LLVM_JIT_DUMP_IR");
-  bool dump_ir = dump_ir_pc != nullptr &&
-                 (!strcmp(dump_ir_pc, "*") ||
-                  program_counter == (uint16_t)strtoul(dump_ir_pc, nullptr, 0));
+  const char *
+    dump_ir_pc = getenv ("LLVM_JIT_DUMP_IR");
+  bool
+    dump_ir = dump_ir_pc != nullptr && (!strcmp (dump_ir_pc, "*") || program_counter == (uint16_t) strtoul (dump_ir_pc, nullptr, 0));
   if (dump_ir)
     {
-      llvm::errs() << "; --- LLVM trace before O2: " << fn_name << " ---\n";
-      module->print(llvm::errs(), nullptr);
+      llvm::errs () << "; --- LLVM trace before O2: " << fn_name << " ---\n";
+      module->print (llvm::errs (), nullptr);
     }
 
   // Generate code
-  MPM.run(*module, MAM);
+  MPM.run (*module, MAM);
   if (dump_ir)
     {
-      llvm::errs() << "; --- LLVM trace after O2: " << fn_name << " ---\n";
-      module->print(llvm::errs(), nullptr);
+      llvm::errs () << "; --- LLVM trace after O2: " << fn_name << " ---\n";
+      module->print (llvm::errs (), nullptr);
     }
-  auto safe_module = llvm::orc::ThreadSafeModule(std::move(module), std::move(context));
-  auto RT = JIT->getMainJITDylib().createResourceTracker();
-  ExitOnErr(JIT->addIRModule(RT, std::move(safe_module)));
-  trace_resources.push_back(RT);
+  auto
+    safe_module = llvm::orc::ThreadSafeModule (std::move (module), std::move (context));
+  auto
+    RT = JIT->getMainJITDylib ().createResourceTracker ();
+  ExitOnErr (JIT->addIRModule (RT, std::move (safe_module)));
+  trace_resources.push_back (RT);
 
   // Return generated code
-  auto sym = ExitOnErr(JIT->lookup(fn_name));
-  return sym.toPtr<code>();
+  auto
+    sym = ExitOnErr (JIT->lookup (fn_name));
+  return sym.toPtr < code > ();
 }
 
 // ------------------------------------------------------------------------
 
-void invalidate_traces()
+void
+invalidate_traces ()
 {
-  for (auto & RT : trace_resources)
+for (auto & RT:trace_resources)
     {
-      ExitOnErr(RT->remove());
+      ExitOnErr (RT->remove ());
     }
-  trace_resources.clear();
+  trace_resources.clear ();
   if (trace_cache)
-    trace_cache->clear();
+    trace_cache->clear ();
   // No trace survives, so nothing is code until it is compiled again.
-  memset(code_bytes, 0, sizeof(code_bytes));
+  memset (code_bytes, 0, sizeof (code_bytes));
   smc_pending = 0;
 #ifdef BENCH
   ++bench_flushes;
 #endif
 }
 
-void teardown_jit(std::unique_ptr<llvm::orc::LLJIT> & JIT)
+void
+teardown_jit (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 {
-  for (auto & RT : trace_resources)
+for (auto & RT:trace_resources)
     {
-      ExitOnErr(RT->remove());
+      ExitOnErr (RT->remove ());
     }
-  trace_resources.clear();
+  trace_resources.clear ();
   if (trace_cache)
     {
-      trace_cache->clear();
-      trace_cache.reset();
+      trace_cache->clear ();
+      trace_cache.reset ();
     }
-  JIT.reset();
+  JIT.reset ();
 }
 
 // ------------------------------------------------------------------------
 
-int main(int argc, const char * argv[])
+int
+main (int argc, const char *argv[])
 {
-  FILE * fp;
-  int trace_count = 0;
-  const char *rom;
+  FILE *
+    fp;
+  int
+    trace_count = 0;
+  const char *
+    rom;
 
 #ifdef BENCH
-  if (bench_parse_args(argc, argv, &rom) != 0)
+  if (bench_parse_args (argc, argv, &rom) != 0)
     {
-      exit(-1);
+      exit (-1);
     }
 #else
   if (argc <= 1)
     {
-      fprintf(stderr, "Usage: %s <rom>\n", argv[0]);
-      exit(-1);
+      fprintf (stderr, "Usage: %s <rom>\n", argv[0]);
+      exit (-1);
     }
   rom = argv[1];
 #endif
 
   // Load program
-  fp = fopen(rom, "rb");
+  fp = fopen (rom, "rb");
   if (fp == NULL)
     {
-      fprintf(stderr, "Could not open ROM %s\n", rom);
-      exit(-1);
+      fprintf (stderr, "Could not open ROM %s\n", rom);
+      exit (-1);
     }
-  if (fread(memory + ENTRYPOINT, sizeof(uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
+  if (fread (memory + ENTRYPOINT, sizeof (uint8_t), MEMORY_SIZE - ENTRYPOINT, fp) == 0)
     {
-      fprintf(stderr, "Could not read ROM\n");
-      fclose(fp);
-      exit(-1);
+      fprintf (stderr, "Could not read ROM\n");
+      fclose (fp);
+      exit (-1);
     }
-  fclose(fp);
+  fclose (fp);
 
   // Initialize CHIP-8 state
-  last_tick = tick();
-  init_chip8();
-  init_io(64, 32);
-  init_interrupt_timer();
+  last_tick = tick ();
+  init_chip8 ();
+  init_io (64, 32);
+  init_interrupt_timer ();
 
   // Initialize LLVM
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
-  auto TheJIT = ExitOnErr(llvm::orc::LLJITBuilder().create());
-  auto DL = TheJIT->getDataLayout();
-  TheJIT->getMainJITDylib().addGenerator(cantFail(llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(DL.getGlobalPrefix())));
+  llvm::InitializeNativeTarget ();
+  llvm::InitializeNativeTargetAsmPrinter ();
+  auto
+    TheJIT = ExitOnErr (llvm::orc::LLJITBuilder ().create ());
+  auto
+    DL = TheJIT->getDataLayout ();
+  TheJIT->getMainJITDylib ().addGenerator (cantFail (llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess (DL.getGlobalPrefix ())));
 
   // Nuggets
-  trace_cache = std::make_unique<std::map<uint16_t, code>>();
+  trace_cache = std::make_unique < std::map < uint16_t, code >> ();
 
   // Transfer
   program_counter = ENTRYPOINT;
   while (1)
     {
       // Look for JITed code starting at current PC
-      auto it = trace_cache->find(program_counter);
+      auto
+	it = trace_cache->find (program_counter);
 
       // If no code found, generate some
-      if (it == trace_cache->end())
-        {
-          code compiled = codegen(TheJIT);
-          if (compiled == nullptr)
-            {
-              break;
-            }
-          trace_cache->operator[](program_counter) = compiled;
+      if (it == trace_cache->end ())
+	{
+	  code
+	    compiled = codegen (TheJIT);
+	  if (compiled == nullptr)
+	    {
+	      break;
+	    }
+	  trace_cache->operator[](program_counter) = compiled;
 #ifdef BENCH
-          ++bench_compiled;
+	  ++bench_compiled;
 #endif
-          continue;
-        }
+	  continue;
+	}
       // Otherwise run the code that has been found
       else
-        {
-          it->second();
-        }
+	{
+	  it->second ();
+	}
 
       // Service any pending timer/input interrupt between traces; this also
       // keeps keys fresh for ROMs that spin on skip_key traces.
-      check_interrupt();
+      check_interrupt ();
 
       if (smc_pending)
-        invalidate_traces();
+	invalidate_traces ();
 
       // If escape or q(uit) has been pressed, exit
-      if ((all_keys_down() & (1<<31)) || program_over)
-        {
-          break;
-        }
+      if ((all_keys_down () & (1 << 31)) || program_over)
+	{
+	  break;
+	}
       trace_count++;
     }
 
   // Deinit CHIP-8
-  deinit_interrupt_timer();
-  deinit_io();
-  deinit_chip8();
+  deinit_interrupt_timer ();
+  deinit_io ();
+  deinit_chip8 ();
 
 #ifdef BENCH
-  bench_report("llvm", "traces", trace_count);
+  bench_report ("llvm", "traces", trace_count);
 #else
-  dump_chip8_state("traces", trace_count);
+  dump_chip8_state ("traces", trace_count);
 #endif
 
-  teardown_jit(TheJIT);
+  teardown_jit (TheJIT);
 
   return 0;
 }
