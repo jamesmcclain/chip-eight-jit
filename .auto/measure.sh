@@ -14,7 +14,7 @@ for rom in "${roms[@]}"; do
   flushes=()
   for ((i=0; i<runs; ++i)); do
     report=$(./src/chip8-llvm-bench "roms/$rom" --instructions 5000000 --seed 20240101 --keys rotate 2>&1 >/dev/null)
-    rates+=("$(awk -F'[= ]+' '/^rate =/{print $3}' <<<"$report")")
+    rates+=("$(awk '/^rate =/{print $3}' <<<"$report")")
     compiled+=("$(awk -F'= *' '/^compiled =/{print $2}' <<<"$report")")
     flushes+=("$(awk -F'= *' '/^flushes =/{print $2}' <<<"$report")")
   done
