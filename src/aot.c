@@ -42,7 +42,12 @@ int main(int ac,char **av) {
       (ac == 6 && strcmp(av[4], "--target")))
     { fprintf(stderr, "Usage: %s ROM -o OUTPUT.ll [--target TRIPLE]\n", av[0]); return 1; }
   if (ac == 6) target = av[5];
-  if(!(in=fopen(av[1],"rb")))die(strerror(errno)); z=fread(rom,1,sizeof rom,in);if(ferror(in)||fgetc(in)!=EOF)die("invalid ROM");fclose(in);if(!z||(z&1))die("ROM size must be a nonzero even number");if(!(out=fopen(av[3],"w")))die(strerror(errno));
+  if (!(in = fopen(av[1], "rb"))) die(strerror(errno));
+  z = fread(rom, 1, sizeof rom, in);
+  if (ferror(in) || fgetc(in) != EOF) die("invalid ROM");
+  fclose(in);
+  if (!z || (z & 1)) die("ROM size must be a nonzero even number");
+  if (!(out = fopen(av[3], "w"))) die(strerror(errno));
   fprintf(out,"; Generated AOT code -- no opcode dispatcher is linked.\n");
   if (target != NULL) fprintf(out, "target triple = \"%s\"\n", target);
   fprintf(out,"@regs = external global [16 x i8]\n@addr = external global i16\n@program_counter = external global i16\ndeclare i1 @chip8_aot_retire()\ndeclare void @chip8_aot_clear()\ndeclare void @chip8_aot_return()\ndeclare void @chip8_aot_call(i16,i16)\ndeclare void @chip8_aot_alu(i8,i8,i8)\ndeclare void @chip8_aot_random(i8,i8)\ndeclare void @chip8_aot_draw(i8,i8,i8)\ndeclare void @chip8_aot_key(i8,i1)\ndeclare void @chip8_aot_f(i8,i8)\ndeclare void @chip8_aot_bad(i16,i16)\n");
