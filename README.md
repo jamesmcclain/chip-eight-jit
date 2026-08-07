@@ -57,7 +57,7 @@ Override the LLVM config binary if needed. For example, use `make LLVM_CONFIG=ll
 make -C src chip8-aot aot-runtime-objs
 src/chip8-aot roms/PONG -o pong.ll
 llvm-as-20 pong.ll -o pong.bc
-clang pong.ll src/aot_runtime.o src/interp.runtime.o src/chip8.o src/ncurses_io.o -lncurses -o pong
+clang pong.ll src/aot_runtime.o src/chip8.o src/ncurses_io.o -lncurses -o pong
 ./pong
 ```
 

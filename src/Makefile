@@ -1,5 +1,8 @@
 DEPFLAGS = -MMD -MP
 CFLAGS ?= -Wall -O -g $(DEPFLAGS)
+# aot_compile.sh links these objects into a compiler-driver PIE on toolchains
+# that enable PIE by default.  Keep every reusable object position-independent.
+override CFLAGS += -fPIC
 CXXFLAGS += $(DEPFLAGS)
 CC = gcc
 CXX = g++
