@@ -24,6 +24,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
@@ -1080,8 +1081,26 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
   JIT_RETURN;
  trace_terminated: // the current block was already terminated by a closed back edge
 
+  // An opt-in trace dump is the microscope for code-generator experiments.
+  // Restrict it to the entry trace, otherwise a benchmark produces a lot of
+  // IR rather than evidence.
+  const char *dump_ir_pc = getenv("LLVM_JIT_DUMP_IR");
+  bool dump_ir = dump_ir_pc != nullptr &&
+                 (!strcmp(dump_ir_pc, "*") ||
+                  program_counter == (uint16_t)strtoul(dump_ir_pc, nullptr, 0));
+  if (dump_ir)
+    {
+      llvm::errs() << "; --- LLVM trace before O2: " << fn_name << " ---\n";
+      module->print(llvm::errs(), nullptr);
+    }
+
   // Generate code
   MPM.run(*module, MAM);
+  if (dump_ir)
+    {
+      llvm::errs() << "; --- LLVM trace after O2: " << fn_name << " ---\n";
+      module->print(llvm::errs(), nullptr);
+    }
   auto safe_module = llvm::orc::ThreadSafeModule(std::move(module), std::move(context));
   auto RT = JIT->getMainJITDylib().createResourceTracker();
   ExitOnErr(JIT->addIRModule(RT, std::move(safe_module)));
