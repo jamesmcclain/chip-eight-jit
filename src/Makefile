@@ -29,15 +29,13 @@ chip8-disas: disas.o
 chip8-asm: asm.o
 	$(CC) $^ $(LDFLAGS) -o $@
 
-# chip8-aot writes a textual LLVM module. Link a generated module with these
-# objects, for example: clang pong.ll aot_runtime.o interp.runtime.o chip8.o ncurses_io.o -lncurses -o pong
+# chip8-aot writes a textual LLVM module. Link generated code only with the
+# AOT host services and VM/I/O state; interp.o is intentionally not involved.
+# Example: clang pong.ll aot_runtime.o chip8.o ncurses_io.o -lncurses -o pong
 chip8-aot: aot.o
 	$(CC) $^ $(LDFLAGS) -o $@
 
-aot-runtime-objs: aot_runtime.o interp.runtime.o chip8.o ncurses_io.o
-
-interp.runtime.o: interp.c
-	$(CC) $(CFLAGS) -DCHIP8_RUNTIME $(CPPFLAGS) $< -c -o $@
+aot-runtime-objs: aot_runtime.o chip8.o ncurses_io.o
 
 llvm_jit.o: llvm_jit.cpp
 	$(CXX) $(CFLAGS) $(CXXSTD) $(CXXFLAGS) $(shell $(LLVM_CONFIG) --cxxflags) $< -c -o $@
