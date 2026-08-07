@@ -11,7 +11,7 @@ LLVM_CONFIG ?= llvm-config-20
 LLVM_LIBS = $(shell $(LLVM_CONFIG) --ldflags --system-libs --libs core orcjit native)
 GCCJIT_LIBS = -lgccjit
 
-all: chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm chip8-aot
+all: chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm chip8-aot aot-runtime-objs
 
 # Deterministic benchmark / differential-test builds: same engines, headless
 # I/O, virtual clock, fixed seed, instruction budget. See bench.h.
