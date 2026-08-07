@@ -13,8 +13,7 @@ int height = 0;
 #define KEY_ESC (27)
 
 
-void
-init_io (int _width, int _height)
+void init_io (int _width, int _height)
 {
   width = _width;
   height = _height;
@@ -30,15 +29,13 @@ init_io (int _width, int _height)
   refresh_io ();
 }
 
-void
-deinit_io ()
+void deinit_io ()
 {
   delwin (window);
   endwin ();
 }
 
-int
-draw_io (int x, int y, int n, uint8_t *mem)
+int draw_io (int x, int y, int n, uint8_t *mem)
 {
   int vf = 0;
 
@@ -77,15 +74,13 @@ draw_io (int x, int y, int n, uint8_t *mem)
   return vf;
 }
 
-void
-clearscreen_io ()
+void clearscreen_io ()
 {
   memset (display, 0, DISPLAY_SIZE * sizeof (uint8_t));
   wclear (window);
 }
 
-uint32_t
-read_keys_io ()
+uint32_t read_keys_io ()
 {
   int key;
   uint32_t keys_down = 0;
@@ -132,8 +127,7 @@ read_keys_io ()
   return keys_down;
 }
 
-void
-refresh_io ()
+void refresh_io ()
 {
   prefresh (window, 0, 0, 0, 0, height + 3, width + 2);
 }

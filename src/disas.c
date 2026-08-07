@@ -21,8 +21,7 @@ static unsigned char class[MEMORY_SIZE];	/* 0 = unknown, 1 = code, 2 = data */
 
 /* Whether the word is a valid, supported CHIP-8 instruction.  Data bytes
    encountered during descent fail this test and terminate the path. */
-static bool
-valid_opcode (uint16_t op)
+static bool valid_opcode (uint16_t op)
 {
   unsigned kk = op & 0xff, n = op & 0xf;
   if (op == 0x00e0 || op == 0x00ee)
@@ -58,8 +57,7 @@ valid_opcode (uint16_t op)
 }
 
 /* A label can only be referenced/emitted for an in-ROM, 2-byte aligned address. */
-static bool
-labelable (unsigned addr, size_t size)
+static bool labelable (unsigned addr, size_t size)
 {
   return addr >= ENTRYPOINT && addr + 1 < ENTRYPOINT + size && !(addr & 1);
 }
@@ -68,8 +66,7 @@ labelable (unsigned addr, size_t size)
    instructions following a control-flow transfer all start basic blocks.
    Bnnn (JP V0, nnn) is a computed jump; its targets cannot be found
    statically, so analysis may be incomplete for ROMs using jump tables. */
-static void
-analyze (size_t size)
+static void analyze (size_t size)
 {
   unsigned end = ENTRYPOINT + size;
   leader[ENTRYPOINT] = true;
@@ -122,8 +119,7 @@ analyze (size_t size)
     }
 }
 
-static void
-mark_data (unsigned addr, unsigned len, size_t size)
+static void mark_data (unsigned addr, unsigned len, size_t size)
 {
   for (unsigned a = addr; a < addr + len && a < ENTRYPOINT + size; ++a)
     if (a < MEMORY_SIZE && class[a] != 1)
@@ -133,8 +129,7 @@ mark_data (unsigned addr, unsigned len, size_t size)
 /* A reachable memory-write instruction (LD [I], Vx or LD B, Vx).  If I is
    dynamic or the written range covers known code, the ROM may modify its
    own instructions and static classification is unsound. */
-static void
-note_write (bool have_ldi, unsigned addr, unsigned len)
+static void note_write (bool have_ldi, unsigned addr, unsigned len)
 {
   if (!have_ldi)
     {
@@ -152,8 +147,7 @@ note_write (bool have_ldi, unsigned addr, unsigned len)
    marks n sprite bytes, LD B marks 3 BCD bytes, LD [I]/LD V,[I] mark
    x+1 register-dump bytes.  Bnnn (JP V0) makes the analysis incomplete;
    its base is pushed as one possible entry (V0 == 0) and flagged. */
-static void
-descend (size_t size)
+static void descend (size_t size)
 {
   unsigned end = ENTRYPOINT + size;
   unsigned stack[MEMORY_SIZE / 2];
@@ -245,8 +239,7 @@ descend (size_t size)
    reference can point into the middle of a glued run.  Indirect JP V0
    jumps can in principle land anywhere, which is why the report flags
    the analysis as incomplete when one is seen. */
-static void
-glue_unreachable (size_t size)
+static void glue_unreachable (size_t size)
 {
   unsigned end = ENTRYPOINT + size;
   for (unsigned pc = ENTRYPOINT; pc < end;)
@@ -267,8 +260,7 @@ glue_unreachable (size_t size)
 }
 
 /* Print a code/data/unknown region map to stderr. */
-static void
-print_report (size_t size)
+static void print_report (size_t size)
 {
   unsigned end = ENTRYPOINT + size;
   unsigned totals[3] = { 0, 0, 0 };
@@ -291,8 +283,7 @@ print_report (size_t size)
     fprintf (stderr, "note: assuming no self-modifying code\n");
 }
 
-static void
-output (unsigned pc, const char *format, ...)
+static void output (unsigned pc, const char *format, ...)
 {
   va_list ap;
   if (assembly_output)
@@ -307,8 +298,7 @@ output (unsigned pc, const char *format, ...)
   fputc ('\n', stdout);
 }
 
-static void
-raw_word (unsigned pc, uint16_t op)
+static void raw_word (unsigned pc, uint16_t op)
 {
   if (assembly_output)
     output (pc, ".word 0x%04X ; unrecognized opcode", op);
@@ -316,8 +306,7 @@ raw_word (unsigned pc, uint16_t op)
     output (pc, "op code %04X at pc 0x%04X", op, pc);
 }
 
-static void
-disassemble (unsigned pc, uint16_t op)
+static void disassemble (unsigned pc, uint16_t op)
 {
   unsigned x = (op >> 8) & 0xf, y = (op >> 4) & 0xf;
   unsigned n = op & 0xf, kk = op & 0xff, nnn = op & 0xfff;
@@ -446,8 +435,7 @@ disassemble (unsigned pc, uint16_t op)
 #undef BOTH
 }
 
-int
-main (int argc, const char *argv[])
+int main (int argc, const char *argv[])
 {
   const char *rom = NULL;
   for (int i = 1; i < argc; ++i)

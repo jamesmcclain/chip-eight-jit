@@ -31,8 +31,7 @@ uint16_t addr = 0;
 uint16_t program_counter = 0;
 
 
-void
-init_chip8 ()
+void init_chip8 ()
 {
 #ifdef BENCH
   srand (bench_seed);		// reproducible Cxkk across runs and across engines
@@ -41,13 +40,11 @@ init_chip8 ()
 #endif
 }
 
-void
-deinit_chip8 ()
+void deinit_chip8 ()
 {
 }
 
-void
-dump_chip8_state (const char *counter_label, int counter)
+void dump_chip8_state (const char *counter_label, int counter)
 {
   for (int i = 0; i < REGFILE_SIZE; ++i)
     {

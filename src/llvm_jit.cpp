@@ -208,8 +208,7 @@ static uint8_t code_bytes[MEMORY_SIZE];
 // a peephole folds in (the skip+jump fusion reads the instruction after the
 // skip). Anything the compiler baked into native code must be covered here, or
 // a write over it will go unnoticed.
-static void
-mark_code (uint16_t a, unsigned n)
+static void mark_code (uint16_t a, unsigned n)
 {
   for (unsigned i = 0; i < n; ++i)
     code_bytes[(a + i) & (MEMORY_SIZE - 1)] = 1;
@@ -217,8 +216,7 @@ mark_code (uint16_t a, unsigned n)
 
 // Raise smc_pending only if [a, a+n) overlaps a byte some live trace was
 // compiled from.
-static void
-note_store (uint16_t a, unsigned n)
+static void note_store (uint16_t a, unsigned n)
 {
   for (unsigned i = 0; i < n; ++i)
     if (code_bytes[(a + i) & (MEMORY_SIZE - 1)])
@@ -238,16 +236,14 @@ static_assert (sizeof (program_over) == 1, "JIT_CLOSE_BACKEDGE emits an 8-bit lo
 #ifndef BENCH
 static timer_t interrupt_timer;
 
-static void
-alarm_handler (int signum)
+static void alarm_handler (int signum)
 {
   (void) signum;
   interrupt_pending = 1;
 }
 #endif
 
-static void
-init_interrupt_timer ()
+static void init_interrupt_timer ()
 {
 #ifdef BENCH
   interrupt_pending = 0;
@@ -275,8 +271,7 @@ init_interrupt_timer ()
 #endif
 }
 
-static void
-deinit_interrupt_timer ()
+static void deinit_interrupt_timer ()
 {
 #ifndef BENCH
   timer_delete (interrupt_timer);
@@ -290,11 +285,9 @@ llvm::ExitOnError ExitOnErr;
 
 // ------------------------------------------------------------------------
 
-extern
-  "C"
+extern "C"
 {
-  void
-  clear_key (uint8_t key)
+  void clear_key (uint8_t key)
   {
 #ifdef BENCH
     bench_clear_key (key);
@@ -306,14 +299,12 @@ extern
 #endif
   }
 
-  uint32_t
-  all_keys_down ()
+  uint32_t all_keys_down ()
   {
 #ifdef BENCH
     return bench_keys_now ();
 #else
-    uint32_t
-      all_keys = 0;
+    uint32_t all_keys = 0;
 
     for (int i = 0; i < INPUT_TICKS; ++i)
       {
@@ -323,14 +314,12 @@ extern
 #endif
   }
 
-  int
-  tick ()
+  int tick ()
   {
 #ifdef BENCH
     return bench_tick ();
 #else
-    struct timespec
-      spec;
+    struct timespec spec;
 
     clock_gettime (CLOCK_MONOTONIC, &spec);
     return ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
@@ -342,13 +331,10 @@ extern
   // is read or written, so the value observed depends only on how many
   // instructions have retired -- not on how often this engine happens to
   // service interrupts, which differs between the interpreter and the JITs.
-  void
-  sync_timers ()
+  void sync_timers ()
   {
-    int
-      now = tick ();
-    int
-      elapsed = now - last_tick;
+    int now = tick ();
+    int elapsed = now - last_tick;
 
     if (elapsed > 0)
       {
@@ -359,14 +345,12 @@ extern
   }
 #endif
 
-  void
-  interrupt ()
+  void interrupt ()
   {
 #ifdef BENCH
     sync_timers ();		// keys are polled on demand, not ringed
 #else
-    int
-      current_tick = tick ();
+    int current_tick = tick ();
 
     if (current_tick != last_tick)
       {
@@ -388,8 +372,7 @@ extern
   // Slow path of a safepoint: service timers and input iff the asynchronous
   // timer has fired since the last check. Cheap enough to call from the
   // dispatch loop and from any host helper.
-  void
-  check_interrupt ()
+  void check_interrupt ()
   {
 #ifdef BENCH
     interrupt ();
@@ -415,23 +398,20 @@ extern
   }
 
 #ifdef BENCH
-  void
-  bench_safepoint ()
+  void bench_safepoint ()
   {
     check_interrupt ();
     bench_advance_safepoint ();
   }
 #endif
 
-  void
-  errer ()
+  void errer ()
   {
     fprintf (stderr, "Error: op=%04x pc=%04x\n", op, program_counter);
     exit (-1);
   }
 
-  void
-  retern ()
+  void retern ()
   {
     check_interrupt ();
     if (stack_pointer > 0)
@@ -442,8 +422,7 @@ extern
       ERROR;
   }
 
-  void
-  call ()
+  void call ()
   {
     OP;
     IMMEDIATE12;
@@ -458,8 +437,7 @@ extern
       ERROR;
   }
 
-  void
-  random_byte ()
+  void random_byte ()
   {
     OP;
     X;
@@ -468,17 +446,13 @@ extern
     regs[x] = rand () & 0xff & immediate;
   }
 
-  void
-  store_bcd ()
+  void store_bcd ()
   {
     OP;
     X;
     note_store (addr, 3);
-    uint8_t
-      tmp = regs[x];
-    uint8_t
-      hundreds,
-      tens;
+    uint8_t tmp = regs[x];
+    uint8_t hundreds, tens;
 
     hundreds = tmp / 100;
     tmp %= 100;
@@ -490,8 +464,7 @@ extern
     program_counter += 2;
   }
 
-  void
-  skip_key_x (int up)
+  void skip_key_x (int up)
   {
     OP;
     X;
@@ -504,25 +477,21 @@ extern
     STEP;
   }
 
-  void
-  skip_key_x_up ()
+  void skip_key_x_up ()
   {
     skip_key_x (1);
   }
 
-  void
-  skip_key_x_down ()
+  void skip_key_x_down ()
   {
     skip_key_x (0);
   }
 
-  void
-  load_on_key ()
+  void load_on_key ()
   {
     OP;
     X;
-    uint32_t
-      all_keys = 0;
+    uint32_t all_keys = 0;
 
     do
       {
@@ -562,19 +531,16 @@ extern
       }
   }
 
-  void
-  draw ()
+  void draw ()
   {
     OP;
     X;
     Y;
     IMMEDIATE4;
-    int
-      current_tick;
+    int current_tick;
 
     check_interrupt ();
-    uint8_t
-      sprite[16];
+    uint8_t sprite[16];
     for (int i = 0; i < immediate; ++i)
       {
 	sprite[i] = MEM_AT (addr + i);
@@ -595,8 +561,7 @@ extern
     refresh_io ();
   }
 
-  void
-  save_registers ()
+  void save_registers ()
   {
     OP;
     X;
@@ -609,8 +574,7 @@ extern
     program_counter += 2;
   }
 
-  void
-  restore_registers ()
+  void restore_registers ()
   {
     OP;
     X;
@@ -621,8 +585,7 @@ extern
       }
   }
 
-  void
-  load_sprite_addr ()
+  void load_sprite_addr ()
   {
     OP;
     X;
@@ -631,8 +594,7 @@ extern
     STEP;
   }
 
-  void
-  load_addr_immediate ()
+  void load_addr_immediate ()
   {
     OP;
     IMMEDIATE12;
@@ -644,26 +606,18 @@ extern
 
 // ------------------------------------------------------------------------
 
-code
-codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
+code codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 {
-  char
-    fn_name[16];
+  char fn_name[16];
   sprintf (fn_name, "ADDR%0X", program_counter);
-  auto
-    context = std::make_unique < llvm::LLVMContext > ();
-  auto
-    module = std::make_unique < llvm::Module > ("CHIP-8", *context);
-  auto
-    fn_type = llvm::FunctionType::get (llvm::Type::getVoidTy (*context),
-				       {
-				       }, false);
-  auto
-    builder = std::make_unique < llvm::IRBuilder <>> (*context);
-  auto
-    linkage = llvm::Function::ExternalLinkage;
-  auto
-    function = llvm::Function::Create (fn_type, linkage, fn_name, *module);
+  auto context = std::make_unique < llvm::LLVMContext > ();
+  auto module = std::make_unique < llvm::Module > ("CHIP-8", *context);
+  auto fn_type = llvm::FunctionType::get (llvm::Type::getVoidTy (*context),
+					  {
+					  }, false);
+  auto builder = std::make_unique < llvm::IRBuilder <>> (*context);
+  auto linkage = llvm::Function::ExternalLinkage;
+  auto function = llvm::Function::Create (fn_type, linkage, fn_name, *module);
 
   // https://llvm.org/docs/NewPassManager.html
   llvm::LoopAnalysisManager LAM;
@@ -707,8 +661,7 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
       {
 	// One block per instruction, so that any address in the trace is a
 	// branch target.
-	auto
-	  pc_blk = llvm::BasicBlock::Create (*context, "", function);
+	auto pc_blk = llvm::BasicBlock::Create (*context, "", function);
 	builder->CreateBr (pc_blk);
 	basic_block = pc_blk;
 	builder->SetInsertPoint (basic_block);
@@ -786,19 +739,14 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 	    // which is what trace extension already assumes, so it is marked as
 	    // code below: a ROM that writes over it raises smc_pending and the
 	    // cache is discarded.
-	    uint16_t
-	      fused_op = OPCODE_AT ((uint16_t) (pc + 2));
+	    uint16_t fused_op = OPCODE_AT ((uint16_t) (pc + 2));
 	    mark_code ((uint16_t) (pc + 2), 2);
-	    bool
-	      fused = ((fused_op & 0xf000) == 0x1000);
-	    uint16_t
-	      fused_target = fused_op & 0x0fff;
+	    bool fused = ((fused_op & 0xf000) == 0x1000);
+	    uint16_t fused_target = fused_op & 0x0fff;
 
 	    // Generate comparison
-	    auto
-	      then_block = llvm::BasicBlock::Create (*context, "", function);
-	    auto
-	      else_block = llvm::BasicBlock::Create (*context, "", function);
+	    auto then_block = llvm::BasicBlock::Create (*context, "", function);
+	    auto else_block = llvm::BasicBlock::Create (*context, "", function);
 	    llvm::CmpInst::Predicate pred = llvm::CmpInst::Predicate::ICMP_EQ;
 	    switch ((op & 0xf000) >> 12)
 	      {
@@ -821,8 +769,7 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  JIT_LOADREG (x);
 		  IMMEDIATE8;
 		  JIT_IMM8;
-		  auto
-		    cond = builder->CreateCmp (pred, JIT_VALUE (x), JIT_VALUE (immediate));
+		  auto cond = builder->CreateCmp (pred, JIT_VALUE (x), JIT_VALUE (immediate));
 		  builder->CreateCondBr (cond, then_block, else_block);
 		  break;
 		}
@@ -835,8 +782,7 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    cond = builder->CreateCmp (pred, JIT_VALUE (x), JIT_VALUE (y));
+		  auto cond = builder->CreateCmp (pred, JIT_VALUE (x), JIT_VALUE (y));
 		  builder->CreateCondBr (cond, then_block, else_block);
 		  break;
 		}
@@ -894,8 +840,7 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 	    JIT_LOADREG (x);
 	    IMMEDIATE8;
 	    JIT_IMM8;
-	    auto
-	      sum_value = builder->CreateAdd (JIT_VALUE (x), JIT_VALUE (immediate));
+	    auto sum_value = builder->CreateAdd (JIT_VALUE (x), JIT_VALUE (immediate));
 	    builder->CreateStore (sum_value, JIT_PTR (x));
 	    JIT_STEP;
 	  }
@@ -921,8 +866,7 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    or_value = builder->CreateOr (JIT_VALUE (x), JIT_VALUE (y));
+		  auto or_value = builder->CreateOr (JIT_VALUE (x), JIT_VALUE (y));
 		  builder->CreateStore (or_value, JIT_PTR (x));
 		  JIT_STEP;
 		}
@@ -934,8 +878,7 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    and_value = builder->CreateAnd (JIT_VALUE (x), JIT_VALUE (y));
+		  auto and_value = builder->CreateAnd (JIT_VALUE (x), JIT_VALUE (y));
 		  builder->CreateStore (and_value, JIT_PTR (x));
 		  JIT_STEP;
 		}
@@ -947,19 +890,15 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    xor_value = builder->CreateXor (JIT_VALUE (x), JIT_VALUE (y));
+		  auto xor_value = builder->CreateXor (JIT_VALUE (x), JIT_VALUE (y));
 		  builder->CreateStore (xor_value, JIT_PTR (x));
 		  JIT_STEP;
 		}
 	      case 0x4:
 		{		// add_register
-		  auto
-		    int16ty = llvm::Type::getInt16Ty (*context);
-		  auto
-		    int8ty = llvm::Type::getInt8Ty (*context);
-		  int
-		    f = 0xf;
+		  auto int16ty = llvm::Type::getInt16Ty (*context);
+		  auto int8ty = llvm::Type::getInt8Ty (*context);
+		  int f = 0xf;
 		  JIT_GETPTRREG (f);	// flags
 		  X;
 		  JIT_GETPTRREG (x);
@@ -967,30 +906,21 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
-		  auto
-		    y16_value = builder->CreateZExt (JIT_VALUE (y), int16ty);
-		  auto
-		    eff_eff = builder->getInt16 (0xff);
-		  auto
-		    sum16_value = builder->CreateAdd (x16_value, y16_value);
-		  auto
-		    cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_SGT, sum16_value, eff_eff);
-		  auto
-		    cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
-		  auto
-		    sum8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (sum16_value, false, int8ty, false), sum16_value, int8ty);
+		  auto x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
+		  auto y16_value = builder->CreateZExt (JIT_VALUE (y), int16ty);
+		  auto eff_eff = builder->getInt16 (0xff);
+		  auto sum16_value = builder->CreateAdd (x16_value, y16_value);
+		  auto cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_SGT, sum16_value, eff_eff);
+		  auto cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
+		  auto sum8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (sum16_value, false, int8ty, false), sum16_value, int8ty);
 		  builder->CreateStore (sum8_value, x_ptr);
 		  builder->CreateStore (cmp8_value, JIT_PTR (f));
 		  JIT_STEP;
 		}
 	      case 0x5:
 		{		// sub_register;
-		  auto
-		    int8ty = llvm::Type::getInt8Ty (*context);
-		  int
-		    f = 0xf;
+		  auto int8ty = llvm::Type::getInt8Ty (*context);
+		  int f = 0xf;
 		  JIT_GETPTRREG (f);
 		  X;
 		  JIT_GETPTRREG (x);
@@ -998,42 +928,32 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE (x), JIT_VALUE (y));
-		  auto
-		    cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
-		  auto
-		    diff_value = builder->CreateSub (JIT_VALUE (x), JIT_VALUE (y));
+		  auto cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE (x), JIT_VALUE (y));
+		  auto cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
+		  auto diff_value = builder->CreateSub (JIT_VALUE (x), JIT_VALUE (y));
 		  builder->CreateStore (diff_value, JIT_PTR (x));
 		  builder->CreateStore (cmp8_value, JIT_PTR (f));
 		  JIT_STEP;
 		}
 	      case 0x6:
 		{		// shift_right
-		  auto
-		    int8ty = llvm::Type::getInt8Ty (*context);
+		  auto int8ty = llvm::Type::getInt8Ty (*context);
 		  X;
 		  JIT_GETPTRREG (x);
 		  JIT_LOADREG (x);
-		  int
-		    f = 0xf;
+		  int f = 0xf;
 		  JIT_GETPTRREG (f);
-		  auto
-		    andone_value = builder->CreateAnd (JIT_VALUE (x), 0x01);
-		  auto
-		    shr_value = builder->CreateLShr (JIT_VALUE (x), 1);
-		  auto
-		    shr8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (shr_value, false, int8ty, false), shr_value, int8ty);
+		  auto andone_value = builder->CreateAnd (JIT_VALUE (x), 0x01);
+		  auto shr_value = builder->CreateLShr (JIT_VALUE (x), 1);
+		  auto shr8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (shr_value, false, int8ty, false), shr_value, int8ty);
 		  builder->CreateStore (shr8_value, JIT_PTR (x));
 		  builder->CreateStore (andone_value, JIT_PTR (f));
 		  JIT_STEP;
 		}
 	      case 0x7:
 		{		// subn_register
-		  auto
-		    int8ty = llvm::Type::getInt8Ty (*context);
-		  int
-		    f = 0xf;
+		  auto int8ty = llvm::Type::getInt8Ty (*context);
+		  int f = 0xf;
 		  JIT_GETPTRREG (f);
 		  X;
 		  JIT_GETPTRREG (x);
@@ -1041,12 +961,9 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  Y;
 		  JIT_GETPTRREG (y);
 		  JIT_LOADREG (y);
-		  auto
-		    cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE (y), JIT_VALUE (x));
-		  auto
-		    cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
-		  auto
-		    diff_value = builder->CreateSub (JIT_VALUE (y), JIT_VALUE (x));
+		  auto cmp_value = builder->CreateCmp (llvm::CmpInst::Predicate::ICMP_UGE, JIT_VALUE (y), JIT_VALUE (x));
+		  auto cmp8_value = builder->CreateCast (llvm::CastInst::getCastOpcode (cmp_value, false, int8ty, false), cmp_value, int8ty);
+		  auto diff_value = builder->CreateSub (JIT_VALUE (y), JIT_VALUE (x));
 		  builder->CreateStore (diff_value, JIT_PTR (x));
 		  builder->CreateStore (cmp8_value, JIT_PTR (f));
 		  JIT_STEP;
@@ -1056,15 +973,11 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  X;
 		  JIT_GETPTRREG (x);
 		  JIT_LOADREG (x);
-		  int
-		    f = 0xf;
+		  int f = 0xf;
 		  JIT_GETPTRREG (f);
-		  auto
-		    andeight_value = builder->CreateAnd (JIT_VALUE (x), 0x80);
-		  auto
-		    msb_value = builder->CreateLShr (andeight_value, 7);
-		  auto
-		    shl_value = builder->CreateShl (JIT_VALUE (x), 1);
+		  auto andeight_value = builder->CreateAnd (JIT_VALUE (x), 0x80);
+		  auto msb_value = builder->CreateLShr (andeight_value, 7);
+		  auto shl_value = builder->CreateShl (JIT_VALUE (x), 1);
 		  builder->CreateStore (shl_value, JIT_PTR (x));
 		  builder->CreateStore (msb_value, JIT_PTR (f));
 		  JIT_STEP;
@@ -1084,19 +997,15 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 	  }
 	case 0xb:
 	  {			// branch
-	    int
-	      z = 0;
+	    int z = 0;
 	    JIT_GETPTRREG (z);
 	    JIT_LOADREG (z);
 	    IMMEDIATE12;
 	    JIT_IMM16;
 	    JIT_GETPTR16 (program_counter);
-	    auto
-	      int16ty = llvm::Type::getInt16Ty (*context);
-	    auto
-	      z16_value = builder->CreateZExt (JIT_VALUE (z), int16ty);
-	    auto
-	      pc_value = builder->CreateAdd (JIT_VALUE (immediate), z16_value);
+	    auto int16ty = llvm::Type::getInt16Ty (*context);
+	    auto z16_value = builder->CreateZExt (JIT_VALUE (z), int16ty);
+	    auto pc_value = builder->CreateAdd (JIT_VALUE (immediate), z16_value);
 	    builder->CreateStore (pc_value, JIT_PTR (program_counter));
 	    JIT_DONE;
 	  }
@@ -1142,12 +1051,9 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		    JIT_CALL ("sync_timers");
 		  }		// access the timer at the current clock
 #endif
-		  auto
-		  JIT_LOC (delay_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&delay_timer), false));
-		  auto
-		  JIT_PTR (delay_timer) = builder->CreateIntToPtr (JIT_LOC (delay_timer), llvm::PointerType::getUnqual (*context));
-		  auto
-		  JIT_VALUE (delay_timer) = builder->CreateLoad (llvm::Type::getInt8Ty (*context), JIT_PTR (delay_timer));
+		  auto JIT_LOC (delay_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&delay_timer), false));
+		  auto JIT_PTR (delay_timer) = builder->CreateIntToPtr (JIT_LOC (delay_timer), llvm::PointerType::getUnqual (*context));
+		  auto JIT_VALUE (delay_timer) = builder->CreateLoad (llvm::Type::getInt8Ty (*context), JIT_PTR (delay_timer));
 		  builder->CreateStore (JIT_VALUE (delay_timer), JIT_PTR (x));
 		  JIT_STEP;
 		}
@@ -1166,10 +1072,8 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		    JIT_CALL ("sync_timers");
 		  }		// access the timer at the current clock
 #endif
-		  auto
-		  JIT_LOC (delay_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&delay_timer), false));
-		  auto
-		  JIT_PTR (delay_timer) = builder->CreateIntToPtr (JIT_LOC (delay_timer), llvm::PointerType::getUnqual (*context));
+		  auto JIT_LOC (delay_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&delay_timer), false));
+		  auto JIT_PTR (delay_timer) = builder->CreateIntToPtr (JIT_LOC (delay_timer), llvm::PointerType::getUnqual (*context));
 		  builder->CreateStore (JIT_VALUE (x), JIT_PTR (delay_timer));
 		  JIT_STEP;
 		}
@@ -1183,43 +1087,34 @@ codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		    JIT_CALL ("sync_timers");
 		  }		// access the timer at the current clock
 #endif
-		  auto
-		  JIT_LOC (sound_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&sound_timer), false));
-		  auto
-		  JIT_PTR (sound_timer) = builder->CreateIntToPtr (JIT_LOC (sound_timer), llvm::PointerType::getUnqual (*context));
+		  auto JIT_LOC (sound_timer) = llvm::ConstantInt::get (*context, llvm::APInt (sizeof (uint8_t *) * 8, reinterpret_cast < uint64_t > (&sound_timer), false));
+		  auto JIT_PTR (sound_timer) = builder->CreateIntToPtr (JIT_LOC (sound_timer), llvm::PointerType::getUnqual (*context));
 		  builder->CreateStore (JIT_VALUE (x), JIT_PTR (sound_timer));
 		  JIT_STEP;
 		}
 	      case 0x1e:
 		{		// add_addr
-		  auto
-		    int16ty = llvm::Type::getInt16Ty (*context);
+		  auto int16ty = llvm::Type::getInt16Ty (*context);
 		  X;
 		  JIT_GETPTRREG (x);
 		  JIT_LOADREG (x);
 		  JIT_GETPTR16 (addr);
 		  JIT_LOAD16 (addr);
-		  auto
-		    x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
-		  auto
-		    sum_value = builder->CreateAdd (JIT_VALUE (addr), x16_value);
+		  auto x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
+		  auto sum_value = builder->CreateAdd (JIT_VALUE (addr), x16_value);
 		  builder->CreateStore (sum_value, JIT_PTR (addr));
 		  JIT_STEP;
 		}
 	      case 0x29:
 		{		// load_sprite_addr
-		  auto
-		    int16ty = llvm::Type::getInt16Ty (*context);
+		  auto int16ty = llvm::Type::getInt16Ty (*context);
 		  X;
 		  JIT_GETPTRREG (x);
 		  JIT_LOADREG (x);
 		  JIT_GETPTR16 (addr);
-		  auto
-		    five_value = builder->getInt16 (5);
-		  auto
-		    x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
-		  auto
-		    prod_value = builder->CreateMul (x16_value, five_value);
+		  auto five_value = builder->getInt16 (5);
+		  auto x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
+		  auto prod_value = builder->CreateMul (x16_value, five_value);
 		  builder->CreateStore (prod_value, JIT_PTR (addr));
 		  JIT_STEP;
 		}
@@ -1257,10 +1152,8 @@ trace_terminated:		// the current block was already terminated by a closed back 
   // An opt-in trace dump is the microscope for code-generator experiments.
   // Restrict it to the entry trace, otherwise a benchmark produces a lot of
   // IR rather than evidence.
-  const char *
-    dump_ir_pc = getenv ("LLVM_JIT_DUMP_IR");
-  bool
-    dump_ir = dump_ir_pc != nullptr && (!strcmp (dump_ir_pc, "*") || program_counter == (uint16_t) strtoul (dump_ir_pc, nullptr, 0));
+  const char *dump_ir_pc = getenv ("LLVM_JIT_DUMP_IR");
+  bool dump_ir = dump_ir_pc != nullptr && (!strcmp (dump_ir_pc, "*") || program_counter == (uint16_t) strtoul (dump_ir_pc, nullptr, 0));
   if (dump_ir)
     {
       llvm::errs () << "; --- LLVM trace before O2: " << fn_name << " ---\n";
@@ -1274,23 +1167,19 @@ trace_terminated:		// the current block was already terminated by a closed back 
       llvm::errs () << "; --- LLVM trace after O2: " << fn_name << " ---\n";
       module->print (llvm::errs (), nullptr);
     }
-  auto
-    safe_module = llvm::orc::ThreadSafeModule (std::move (module), std::move (context));
-  auto
-    RT = JIT->getMainJITDylib ().createResourceTracker ();
+  auto safe_module = llvm::orc::ThreadSafeModule (std::move (module), std::move (context));
+  auto RT = JIT->getMainJITDylib ().createResourceTracker ();
   ExitOnErr (JIT->addIRModule (RT, std::move (safe_module)));
   trace_resources.push_back (RT);
 
   // Return generated code
-  auto
-    sym = ExitOnErr (JIT->lookup (fn_name));
+  auto sym = ExitOnErr (JIT->lookup (fn_name));
   return sym.toPtr < code > ();
 }
 
 // ------------------------------------------------------------------------
 
-void
-invalidate_traces ()
+void invalidate_traces ()
 {
 for (auto & RT:trace_resources)
     {
@@ -1307,8 +1196,7 @@ for (auto & RT:trace_resources)
 #endif
 }
 
-void
-teardown_jit (std::unique_ptr < llvm::orc::LLJIT > &JIT)
+void teardown_jit (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 {
 for (auto & RT:trace_resources)
     {
@@ -1325,15 +1213,11 @@ for (auto & RT:trace_resources)
 
 // ------------------------------------------------------------------------
 
-int
-main (int argc, const char *argv[])
+int main (int argc, const char *argv[])
 {
-  FILE *
-    fp;
-  int
-    trace_count = 0;
-  const char *
-    rom;
+  FILE *fp;
+  int trace_count = 0;
+  const char *rom;
 
 #ifdef BENCH
   if (bench_parse_args (argc, argv, &rom) != 0)
@@ -1373,10 +1257,8 @@ main (int argc, const char *argv[])
   // Initialize LLVM
   llvm::InitializeNativeTarget ();
   llvm::InitializeNativeTargetAsmPrinter ();
-  auto
-    TheJIT = ExitOnErr (llvm::orc::LLJITBuilder ().create ());
-  auto
-    DL = TheJIT->getDataLayout ();
+  auto TheJIT = ExitOnErr (llvm::orc::LLJITBuilder ().create ());
+  auto DL = TheJIT->getDataLayout ();
   TheJIT->getMainJITDylib ().addGenerator (cantFail (llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess (DL.getGlobalPrefix ())));
 
   // Nuggets
@@ -1387,14 +1269,12 @@ main (int argc, const char *argv[])
   while (1)
     {
       // Look for JITed code starting at current PC
-      auto
-	it = trace_cache->find (program_counter);
+      auto it = trace_cache->find (program_counter);
 
       // If no code found, generate some
       if (it == trace_cache->end ())
 	{
-	  code
-	    compiled = codegen (TheJIT);
+	  code compiled = codegen (TheJIT);
 	  if (compiled == nullptr)
 	    {
 	      break;

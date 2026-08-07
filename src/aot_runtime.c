@@ -15,16 +15,14 @@ uint8_t delay_timer, sound_timer;
 #define NANOS_PER_INPUT_TICK (NANOS_PER_TICK / 10)
 static uint32_t retired;
 static int last_tick;
-static int
-tick (void)
+static int tick (void)
 {
   struct timespec spec;
   clock_gettime (CLOCK_MONOTONIC, &spec);
   return (int) ((spec.tv_nsec / NANOS_PER_TICK) % TICKS_PER_SECOND);
 }
 
-static void
-service_timers (void)
+static void service_timers (void)
 {
   int now = tick ();
   if (now != last_tick)
@@ -48,8 +46,7 @@ extern const uint32_t chip8_aot_rom_size;
 static uint32_t key_history[INPUT_TICKS];
 static unsigned key_slot;
 static int64_t last_key_poll;
-static void
-poll_keys (void)
+static void poll_keys (void)
 {
   key_history[key_slot] = read_keys_io ();
   key_slot = (key_slot + 1) % INPUT_TICKS;
@@ -58,8 +55,7 @@ poll_keys (void)
 /* A ten-entry history represents roughly 1/60 second, not ten host CPU
    instructions.  Polling on every lowered block made a key disappear in a
    few microseconds on fast ROMs. */
-static void
-poll_keys_if_due (void)
+static void poll_keys_if_due (void)
 {
   struct timespec spec;
   int64_t now;
@@ -72,8 +68,7 @@ poll_keys_if_due (void)
     }
 }
 
-static uint32_t
-keys (void)
+static uint32_t keys (void)
 {
   uint32_t down = 0;
   for (unsigned i = 0; i < INPUT_TICKS; ++i)
@@ -81,15 +76,13 @@ keys (void)
   return down;
 }
 
-static void
-clear_key (uint8_t key)
+static void clear_key (uint8_t key)
 {
   for (unsigned i = 0; i < INPUT_TICKS; ++i)
     key_history[i] &= ~(1u << key);
 }
 
-int
-chip8_aot_retire (void)
+int chip8_aot_retire (void)
 {
   ++retired;
   poll_keys_if_due ();
@@ -98,14 +91,12 @@ chip8_aot_retire (void)
   return (keys () & (1u << 31)) != 0;
 }
 
-void
-chip8_aot_clear (void)
+void chip8_aot_clear (void)
 {
   clearscreen_io ();
 }
 
-void
-chip8_aot_return (void)
+void chip8_aot_return (void)
 {
   if (stack_pointer)
     program_counter = stack[--stack_pointer];
@@ -113,8 +104,7 @@ chip8_aot_return (void)
     program_counter = 0xffff;
 }
 
-void
-chip8_aot_call (uint16_t dst, uint16_t ret)
+void chip8_aot_call (uint16_t dst, uint16_t ret)
 {
   if (stack_pointer < STACK_SIZE)
     {
@@ -125,8 +115,7 @@ chip8_aot_call (uint16_t dst, uint16_t ret)
     program_counter = 0xffff;
 }
 
-void
-chip8_aot_alu (uint8_t x, uint8_t y, uint8_t n)
+void chip8_aot_alu (uint8_t x, uint8_t y, uint8_t n)
 {
   uint8_t a = regs[x], b = regs[y];
   switch (n)
@@ -171,14 +160,12 @@ chip8_aot_alu (uint8_t x, uint8_t y, uint8_t n)
     }
 }
 
-void
-chip8_aot_random (uint8_t x, uint8_t k)
+void chip8_aot_random (uint8_t x, uint8_t k)
 {
   regs[x] = (uint8_t) (rand () & 255) & k;
 }
 
-void
-chip8_aot_draw (uint8_t x, uint8_t y, uint8_t n)
+void chip8_aot_draw (uint8_t x, uint8_t y, uint8_t n)
 {
   uint8_t sprite[16];
   int current_tick;
@@ -193,8 +180,7 @@ chip8_aot_draw (uint8_t x, uint8_t y, uint8_t n)
   refresh_io ();
 }
 
-void
-chip8_aot_key (uint8_t x, int up)
+void chip8_aot_key (uint8_t x, int up)
 {
   poll_keys_if_due ();
   int down = (keys () & (1u << regs[x])) != 0;
@@ -206,8 +192,7 @@ chip8_aot_key (uint8_t x, int up)
   program_counter += 2;
 }
 
-void
-chip8_aot_f (uint8_t x, uint8_t k)
+void chip8_aot_f (uint8_t x, uint8_t k)
 {
   unsigned i;
   switch (k)
@@ -262,14 +247,12 @@ chip8_aot_f (uint8_t x, uint8_t k)
     }
 }
 
-void
-chip8_aot_bad (uint16_t op, uint16_t pc)
+void chip8_aot_bad (uint16_t op, uint16_t pc)
 {
   fprintf (stderr, "Error: op=%04x pc=%04x\n", op, pc);
 }
 
-int
-main (void)
+int main (void)
 {
   init_chip8 ();
   last_tick = tick ();

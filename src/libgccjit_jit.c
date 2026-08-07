@@ -53,8 +53,7 @@ static uint8_t code_bytes[MEMORY_SIZE];
 // a peephole folds in (the skip+jump fusion reads the instruction after the
 // skip). Anything the compiler baked into native code must be covered here, or
 // a write over it will go unnoticed.
-static void
-mark_code (uint16_t a, unsigned n)
+static void mark_code (uint16_t a, unsigned n)
 {
   for (unsigned i = 0; i < n; ++i)
     code_bytes[(a + i) & (MEMORY_SIZE - 1)] = 1;
@@ -62,8 +61,7 @@ mark_code (uint16_t a, unsigned n)
 
 // Raise smc_pending only if [a, a+n) overlaps a byte some live trace was
 // compiled from.
-static void
-note_store (uint16_t a, unsigned n)
+static void note_store (uint16_t a, unsigned n)
 {
   for (unsigned i = 0; i < n; ++i)
     if (code_bytes[(a + i) & (MEMORY_SIZE - 1)])
@@ -81,16 +79,14 @@ volatile sig_atomic_t interrupt_pending = 0;
 #ifndef BENCH
 static timer_t interrupt_timer;
 
-static void
-alarm_handler (int signum)
+static void alarm_handler (int signum)
 {
   (void) signum;
   interrupt_pending = 1;
 }
 #endif
 
-static void
-init_interrupt_timer (void)
+static void init_interrupt_timer (void)
 {
 #ifdef BENCH
   interrupt_pending = 0;
@@ -118,8 +114,7 @@ init_interrupt_timer (void)
 #endif
 }
 
-static void
-deinit_interrupt_timer (void)
+static void deinit_interrupt_timer (void)
 {
 #ifndef BENCH
   timer_delete (interrupt_timer);
@@ -140,8 +135,7 @@ typedef void (*code) (void);	// pointer to a compiled trace
 // known instruction address immediately before those calls; inline stretches
 // keep the PC in the code generator instead of storing it after every opcode.
 
-void
-clear_key (uint8_t key)
+void clear_key (uint8_t key)
 {
 #ifdef BENCH
   bench_clear_key (key);
@@ -153,8 +147,7 @@ clear_key (uint8_t key)
 #endif
 }
 
-uint32_t
-all_keys_down ()
+uint32_t all_keys_down ()
 {
 #ifdef BENCH
   return bench_keys_now ();
@@ -169,8 +162,7 @@ all_keys_down ()
 #endif
 }
 
-int
-tick ()
+int tick ()
 {
 #ifdef BENCH
   return bench_tick ();
@@ -189,8 +181,7 @@ tick ()
 // happens to service interrupts. Without it the interpreter (which services
 // on every jump) and the JITs (which service at safepoints) disagree
 // whenever a timer is read close to a tick boundary.
-void
-sync_timers (void)
+void sync_timers (void)
 {
   int now = tick ();
   int elapsed = now - last_tick;
@@ -204,8 +195,7 @@ sync_timers (void)
 }
 #endif
 
-void
-interrupt ()
+void interrupt ()
 {
 #ifdef BENCH
   sync_timers ();		// keys are polled on demand, not ringed
@@ -233,8 +223,7 @@ interrupt ()
 // timer has fired since the last check. Cheap enough to call from the
 // dispatch loop and from any host helper. Must stay visible in the dynamic
 // symbol table (see HOST_FNS) so JITed traces can call it.
-void
-check_interrupt ()
+void check_interrupt ()
 {
 #ifdef BENCH
   interrupt ();
@@ -260,23 +249,20 @@ check_interrupt ()
 }
 
 #ifdef BENCH
-void
-bench_safepoint (void)
+void bench_safepoint (void)
 {
   check_interrupt ();
   bench_advance_safepoint ();
 }
 #endif
 
-void
-errer ()
+void errer ()
 {
   fprintf (stderr, "Error: op=%04x pc=%04x\n", op, program_counter);
   exit (-1);
 }
 
-void
-retern ()
+void retern ()
 {
   check_interrupt ();
   if (stack_pointer > 0)
@@ -287,8 +273,7 @@ retern ()
     errer ();
 }
 
-void
-call ()
+void call ()
 {
   op = OP_AT (program_counter);
   IMMEDIATE12;
@@ -303,8 +288,7 @@ call ()
     errer ();
 }
 
-void
-random_byte ()
+void random_byte ()
 {
   op = OP_AT (program_counter);
   X;
@@ -313,8 +297,7 @@ random_byte ()
   regs[x] = rand () & 0xff & immediate;
 }
 
-void
-store_bcd ()
+void store_bcd ()
 {
   op = OP_AT (program_counter);
   X;
@@ -332,8 +315,7 @@ store_bcd ()
   program_counter += 2;
 }
 
-void
-skip_key_x (int up)
+void skip_key_x (int up)
 {
   op = OP_AT (program_counter);
   X;
@@ -346,20 +328,17 @@ skip_key_x (int up)
   program_counter += 2;
 }
 
-void
-skip_key_x_up ()
+void skip_key_x_up ()
 {
   skip_key_x (1);
 }
 
-void
-skip_key_x_down ()
+void skip_key_x_down ()
 {
   skip_key_x (0);
 }
 
-void
-load_on_key ()
+void load_on_key ()
 {
   op = OP_AT (program_counter);
   X;
@@ -403,8 +382,7 @@ load_on_key ()
     }
 }
 
-void
-draw ()
+void draw ()
 {
   op = OP_AT (program_counter);
   X;
@@ -434,8 +412,7 @@ draw ()
   refresh_io ();
 }
 
-void
-save_registers ()
+void save_registers ()
 {
   op = OP_AT (program_counter);
   X;
@@ -448,8 +425,7 @@ save_registers ()
   program_counter += 2;
 }
 
-void
-restore_registers ()
+void restore_registers ()
 {
   op = OP_AT (program_counter);
   X;
@@ -467,8 +443,7 @@ restore_registers ()
 // register / address the JIT touches is known at codegen time (x, y and the
 // fixed globals), we can embed the concrete pointer as a constant and
 // dereference it, rather than importing arrays and doing array-access IR.
-static gcc_jit_lvalue *
-mem (gcc_jit_context *ctx, gcc_jit_type *ptr_type, void *host_addr)
+static gcc_jit_lvalue *mem (gcc_jit_context *ctx, gcc_jit_type *ptr_type, void *host_addr)
 {
   gcc_jit_rvalue *p = gcc_jit_context_new_rvalue_from_ptr (ctx, ptr_type, host_addr);
   return gcc_jit_rvalue_dereference (p, NULL);
@@ -477,8 +452,7 @@ mem (gcc_jit_context *ctx, gcc_jit_type *ptr_type, void *host_addr)
 // Read an 8-bit register once into a fresh local, so later assignments to the
 // same (or aliasing) storage cannot disturb the value -- this reproduces the
 // SSA "load once" semantics that the LLVM backend gets for free.
-static gcc_jit_rvalue *
-snapshot (gcc_jit_context *ctx, gcc_jit_function *fn, gcc_jit_block *blk, gcc_jit_type *u8, gcc_jit_type *u8p, void *host_addr, int id)
+static gcc_jit_rvalue *snapshot (gcc_jit_context *ctx, gcc_jit_function *fn, gcc_jit_block *blk, gcc_jit_type *u8, gcc_jit_type *u8p, void *host_addr, int id)
 {
   char name[24];
   snprintf (name, sizeof (name), "snap_%d", id);
@@ -503,8 +477,7 @@ static const char *HOST_FNS[] = {
 
 #define N_HOST_FNS ((int)(sizeof(HOST_FNS)/sizeof(HOST_FNS[0])))
 
-static gcc_jit_function *
-host_fn (gcc_jit_function **tbl, const char *name)
+static gcc_jit_function *host_fn (gcc_jit_function **tbl, const char *name)
 {
   for (int i = 0; i < N_HOST_FNS; ++i)
     if (strcmp (HOST_FNS[i], name) == 0)
@@ -516,8 +489,7 @@ static gcc_jit_result **trace_results = NULL;
 static size_t n_trace_results = 0;
 static size_t cap_trace_results = 0;
 
-static void
-remember_result (gcc_jit_result *result)
+static void remember_result (gcc_jit_result *result)
 {
   if (n_trace_results == cap_trace_results)
     {
@@ -536,8 +508,7 @@ remember_result (gcc_jit_result *result)
   trace_results[n_trace_results++] = result;
 }
 
-static void
-teardown_jit (void)
+static void teardown_jit (void)
 {
   for (size_t i = 0; i < n_trace_results; ++i)
     {
@@ -555,8 +526,7 @@ teardown_jit (void)
 // extended across unconditional jumps (bounded) and the taken side of skips,
 // matching the LLVM backend. Control-flow / IO opcodes terminate the trace.
 
-code
-codegen (void)
+code codegen (void)
 {
   char fn_name[16];
   snprintf (fn_name, sizeof (fn_name), "ADDR%04X", program_counter);
@@ -1097,8 +1067,7 @@ trace_terminated:		// blk was already terminated by a closed back edge
 
 code trace_cache[1 << 16];	// indexed by program_counter; zero-initialized
 
-int
-main (int argc, const char *argv[])
+int main (int argc, const char *argv[])
 {
   FILE *fp;
   int trace_count = 0;

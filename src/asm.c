@@ -23,8 +23,7 @@ static size_t symbol_count;
 static const char *filename;
 static unsigned line_number;
 
-static void
-fail (const char *fmt, ...)
+static void fail (const char *fmt, ...)
 {
   va_list ap;
   fprintf (stderr, "%s:%u: error: ", filename, line_number);
@@ -35,15 +34,13 @@ fail (const char *fmt, ...)
   exit (1);
 }
 
-static void
-normalize (char *s)
+static void normalize (char *s)
 {
   for (; *s; ++s)
     *s = (char) toupper ((unsigned char) *s);
 }
 
-static int
-tokenize (char *line, char *tokens[])
+static int tokenize (char *line, char *tokens[])
 {
   int count = 0;
   for (char *p = line; *p;)
@@ -68,8 +65,7 @@ tokenize (char *line, char *tokens[])
   return count;
 }
 
-static bool
-is_name (const char *s)
+static bool is_name (const char *s)
 {
   if (!isalpha ((unsigned char) *s) && *s != '_')
     return false;
@@ -79,8 +75,7 @@ is_name (const char *s)
   return true;
 }
 
-static struct symbol *
-lookup (const char *name)
+static struct symbol *lookup (const char *name)
 {
   for (size_t i = 0; i < symbol_count; ++i)
     if (!strcmp (symbols[i].name, name))
@@ -88,8 +83,7 @@ lookup (const char *name)
   return NULL;
 }
 
-static void
-define (const char *name, unsigned value)
+static void define (const char *name, unsigned value)
 {
   if (!is_name (name))
     fail ("invalid label '%s'", name);
@@ -101,8 +95,7 @@ define (const char *name, unsigned value)
   symbols[symbol_count++].value = value;
 }
 
-static unsigned
-value (const char *s, bool resolve)
+static unsigned value (const char *s, bool resolve)
 {
   char *end;
   unsigned long n;
@@ -122,8 +115,7 @@ value (const char *s, bool resolve)
   return 0;
 }
 
-static unsigned
-reg (const char *s)
+static unsigned reg (const char *s)
 {
   if (s[0] != 'V' || !isxdigit ((unsigned char) s[1]) || s[2])
     fail ("expected V0 through VF, got '%s'", s);
@@ -133,15 +125,13 @@ reg (const char *s)
   return r;
 }
 
-static void
-range (unsigned n, unsigned max, const char *what)
+static void range (unsigned n, unsigned max, const char *what)
 {
   if (n > max)
     fail ("%s out of range: 0x%X", what, n);
 }
 
-static unsigned
-instruction (char *t[], int n, bool resolve)
+static unsigned instruction (char *t[], int n, bool resolve)
 {
   unsigned x, y, z;
 #define NEED(k) do { if (n != (k)) fail("wrong operand count for %s", t[0]); } while (0)
@@ -279,8 +269,7 @@ instruction (char *t[], int n, bool resolve)
 #undef OP
 }
 
-static unsigned
-line_size (char *t[], int n, unsigned pc, bool resolve, uint8_t *out)
+static unsigned line_size (char *t[], int n, unsigned pc, bool resolve, uint8_t *out)
 {
   if (!n)
     return 0;
@@ -333,8 +322,7 @@ line_size (char *t[], int n, unsigned pc, bool resolve, uint8_t *out)
   return 2;
 }
 
-int
-main (int argc, char **argv)
+int main (int argc, char **argv)
 {
   if (argc != 2)
     {

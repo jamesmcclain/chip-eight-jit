@@ -29,24 +29,21 @@ int bench_key_mode = BENCH_KEYS_ROTATE;
 
 static struct timespec bench_start;
 
-void
-init_io (int _width, int _height)
+void init_io (int _width, int _height)
 {
   width = _width;
   height = _height;
   memset (display, 0, sizeof (display));
 }
 
-void
-deinit_io ()
+void deinit_io ()
 {
 }
 
 /* Identical to the ncurses backend's pixel logic: wrap the origin, clip the
    sprite at the edges, XOR, and report collision. Only the rendering is
    dropped, so the framebuffer (and VF) match an interactive run exactly. */
-int
-draw_io (int x, int y, int n, uint8_t *mem)
+int draw_io (int x, int y, int n, uint8_t *mem)
 {
   int vf = 0;
 
@@ -80,19 +77,16 @@ draw_io (int x, int y, int n, uint8_t *mem)
   return vf;
 }
 
-void
-clearscreen_io ()
+void clearscreen_io ()
 {
   memset (display, 0, DISPLAY_SIZE * sizeof (uint8_t));
 }
 
-void
-refresh_io ()
+void refresh_io ()
 {
 }
 
-uint32_t
-read_keys_io ()
+uint32_t read_keys_io ()
 {
   return bench_poll_keys ();
 }
@@ -103,8 +97,7 @@ read_keys_io ()
    readings to learn how many 60 Hz ticks of work have elapsed, and wrapping
    at 60 would corrupt that whenever a run outpaces one virtual second
    between polls. */
-int
-bench_tick (void)
+int bench_tick (void)
 {
   return (int) (bench_now () / BENCH_INSTR_PER_TICK);
 }
@@ -122,8 +115,7 @@ bench_tick (void)
 static uint32_t bench_cleared = 0;
 static long long bench_cleared_tick = -1;
 
-static void
-bench_roll_tick (long long t)
+static void bench_roll_tick (long long t)
 {
   if (t != bench_cleared_tick)
     {
@@ -132,8 +124,7 @@ bench_roll_tick (long long t)
     }
 }
 
-uint32_t
-bench_keys_now (void)
+uint32_t bench_keys_now (void)
 {
   long long t = bench_now () / BENCH_INSTR_PER_TICK;
 
@@ -150,28 +141,24 @@ bench_keys_now (void)
   return (1u << (unsigned) ((t / 4) % 16)) & ~bench_cleared;
 }
 
-void
-bench_clear_key (uint8_t key)
+void bench_clear_key (uint8_t key)
 {
   bench_roll_tick (bench_now () / BENCH_INSTR_PER_TICK);
   bench_cleared |= (1u << key);
 }
 
-uint32_t
-bench_poll_keys (void)
+uint32_t bench_poll_keys (void)
 {
   bench_poll_clock += BENCH_POLL_COST;
   return bench_keys_now ();
 }
 
-int
-bench_done (void)
+int bench_done (void)
 {
   return (bench_retired >= bench_budget) || (bench_now () >= bench_clock_cap);
 }
 
-void
-bench_advance_safepoint (void)
+void bench_advance_safepoint (void)
 {
   do
     {
@@ -180,8 +167,7 @@ bench_advance_safepoint (void)
   while (bench_next_safepoint <= bench_retired);
 }
 
-uint64_t
-bench_display_hash (void)
+uint64_t bench_display_hash (void)
 {
   uint64_t h = 1469598103934665603ULL;
 
@@ -193,8 +179,7 @@ bench_display_hash (void)
   return h;
 }
 
-static void
-usage (const char *prog)
+static void usage (const char *prog)
 {
   fprintf (stderr,
 	   "Usage: %s <rom> [--instructions N] [--seed S] [--keys none|rotate]\n"
@@ -203,8 +188,7 @@ usage (const char *prog)
 	   "have retired, then prints machine state, counters and a display\n" "hash. Two runs of the same build agree exactly, and so do the\n" "interpreter and the JITs.\n", prog);
 }
 
-int
-bench_parse_args (int argc, const char *argv[], const char **rom)
+int bench_parse_args (int argc, const char *argv[], const char **rom)
 {
   *rom = NULL;
 
@@ -265,8 +249,7 @@ bench_parse_args (int argc, const char *argv[], const char **rom)
   return 0;
 }
 
-void
-bench_report (const char *engine, const char *counter_label, int counter)
+void bench_report (const char *engine, const char *counter_label, int counter)
 {
   struct timespec now;
   double elapsed;

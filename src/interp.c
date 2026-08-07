@@ -29,8 +29,7 @@ uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 
 
-void
-clear_key (uint8_t key)
+void clear_key (uint8_t key)
 {
 #ifdef BENCH
   bench_clear_key (key);
@@ -42,8 +41,7 @@ clear_key (uint8_t key)
 #endif
 }
 
-uint32_t
-all_keys_down ()
+uint32_t all_keys_down ()
 {
 #ifdef BENCH
   return bench_keys_now ();
@@ -58,8 +56,7 @@ all_keys_down ()
 #endif
 }
 
-int
-tick ()
+int tick ()
 {
 #ifdef BENCH
   return bench_tick ();
@@ -78,8 +75,7 @@ tick ()
 // happens to service interrupts. Without it the interpreter (which services
 // on every jump) and the JITs (which service at safepoints) disagree
 // whenever a timer is read close to a tick boundary.
-void
-sync_timers (void)
+void sync_timers (void)
 {
   int now = tick ();
   int elapsed = now - last_tick;
@@ -93,8 +89,7 @@ sync_timers (void)
 }
 #endif
 
-void
-interrupt ()
+void interrupt ()
 {
 #ifdef BENCH
   sync_timers ();		// keys are polled on demand, not ringed
@@ -118,15 +113,13 @@ interrupt ()
 #endif
 }
 
-uint32_t
-clearscreen ()
+uint32_t clearscreen ()
 {
   clearscreen_io ();
   STEP;
 }
 
-uint32_t
-jump ()
+uint32_t jump ()
 {
   IMMEDIATE12;
 
@@ -135,8 +128,7 @@ jump ()
   return 0;
 }
 
-uint32_t
-retern ()
+uint32_t retern ()
 {
   interrupt ();
   if (stack_pointer > 0)
@@ -148,8 +140,7 @@ retern ()
     ERROR;
 }
 
-uint32_t
-call ()
+uint32_t call ()
 {
   IMMEDIATE12;
 
@@ -164,8 +155,7 @@ call ()
     ERROR;
 }
 
-uint32_t
-skip_eq_immediate ()
+uint32_t skip_eq_immediate ()
 {
   X;
   IMMEDIATE8;
@@ -177,8 +167,7 @@ skip_eq_immediate ()
   STEP;
 }
 
-uint32_t
-skip_neq_immediate ()
+uint32_t skip_neq_immediate ()
 {
   X;
   IMMEDIATE8;
@@ -190,8 +179,7 @@ skip_neq_immediate ()
   STEP;
 }
 
-uint32_t
-skip_eq_register ()
+uint32_t skip_eq_register ()
 {
   X;
   Y;
@@ -203,8 +191,7 @@ skip_eq_register ()
   STEP;
 }
 
-uint32_t
-load_immediate ()
+uint32_t load_immediate ()
 {
   X;
   IMMEDIATE8;
@@ -213,8 +200,7 @@ load_immediate ()
   STEP;
 }
 
-uint32_t
-add_immediate ()
+uint32_t add_immediate ()
 {
   X;
   IMMEDIATE8;
@@ -223,8 +209,7 @@ add_immediate ()
   STEP;
 }
 
-uint32_t
-move ()
+uint32_t move ()
 {
   X;
   Y;
@@ -233,8 +218,7 @@ move ()
   STEP;
 }
 
-uint32_t
-or ()
+uint32_t or ()
 {
   X;
   Y;
@@ -243,8 +227,7 @@ or ()
   STEP;
 }
 
-uint32_t
-and ()
+uint32_t and ()
 {
   X;
   Y;
@@ -253,8 +236,7 @@ and ()
   STEP;
 }
 
-uint32_t
-xor ()
+uint32_t xor ()
 {
   X;
   Y;
@@ -263,8 +245,7 @@ xor ()
   STEP;
 }
 
-uint32_t
-add_register ()
+uint32_t add_register ()
 {
   X;
   Y;
@@ -275,8 +256,7 @@ add_register ()
   STEP;
 }
 
-uint32_t
-sub_register ()
+uint32_t sub_register ()
 {
   X;
   Y;
@@ -287,8 +267,7 @@ sub_register ()
   STEP;
 }
 
-uint32_t
-shift_right ()
+uint32_t shift_right ()
 {
   X;
   /* Y; */
@@ -300,8 +279,7 @@ shift_right ()
   STEP;
 }
 
-uint32_t
-subn_register ()
+uint32_t subn_register ()
 {
   X;
   Y;
@@ -312,8 +290,7 @@ subn_register ()
   STEP;
 }
 
-uint32_t
-shift_left ()
+uint32_t shift_left ()
 {
   X;
   /* Y; */
@@ -325,8 +302,7 @@ shift_left ()
   STEP;
 }
 
-uint32_t
-skip_neq_register ()
+uint32_t skip_neq_register ()
 {
   X;
   Y;
@@ -338,8 +314,7 @@ skip_neq_register ()
   STEP;
 }
 
-uint32_t
-load_addr_immediate ()
+uint32_t load_addr_immediate ()
 {
   IMMEDIATE12;
 
@@ -347,8 +322,7 @@ load_addr_immediate ()
   STEP;
 }
 
-uint32_t
-branch ()
+uint32_t branch ()
 {
   IMMEDIATE12;
 
@@ -356,8 +330,7 @@ branch ()
   return 0;
 }
 
-uint32_t
-random_byte ()
+uint32_t random_byte ()
 {
   X;
   IMMEDIATE8;
@@ -366,8 +339,7 @@ random_byte ()
   STEP;
 }
 
-uint32_t
-get_delay_timer ()
+uint32_t get_delay_timer ()
 {
   X;
 
@@ -378,8 +350,7 @@ get_delay_timer ()
   STEP;
 }
 
-uint32_t
-set_delay_timer ()
+uint32_t set_delay_timer ()
 {
   X;
 
@@ -390,8 +361,7 @@ set_delay_timer ()
   STEP;
 }
 
-uint32_t
-set_sound_timer ()
+uint32_t set_sound_timer ()
 {
   X;
 
@@ -402,8 +372,7 @@ set_sound_timer ()
   STEP;
 }
 
-uint32_t
-add_addr ()
+uint32_t add_addr ()
 {
   X;
 
@@ -411,8 +380,7 @@ add_addr ()
   STEP;
 }
 
-uint32_t
-store_bcd ()
+uint32_t store_bcd ()
 {
   X;
   uint8_t tmp = regs[x];
@@ -428,8 +396,7 @@ store_bcd ()
   STEP;
 }
 
-uint32_t
-skip_key_x (int up)
+uint32_t skip_key_x (int up)
 {
   X;
 
@@ -441,8 +408,7 @@ skip_key_x (int up)
   STEP;
 }
 
-uint32_t
-load_on_key ()
+uint32_t load_on_key ()
 {
   X;
   uint32_t all_keys = 0;
@@ -484,8 +450,7 @@ load_on_key ()
     }
 }
 
-uint32_t
-draw ()
+uint32_t draw ()
 {
   X;
   Y;
@@ -515,8 +480,7 @@ draw ()
   STEP;
 }
 
-uint32_t
-save_registers ()
+uint32_t save_registers ()
 {
   X;
 
@@ -527,8 +491,7 @@ save_registers ()
   STEP;
 }
 
-uint32_t
-restore_registers ()
+uint32_t restore_registers ()
 {
   X;
 
@@ -539,8 +502,7 @@ restore_registers ()
   STEP;
 }
 
-uint32_t
-load_sprite_addr ()
+uint32_t load_sprite_addr ()
 {
   X;
 
@@ -548,8 +510,7 @@ load_sprite_addr ()
   STEP;
 }
 
-uint32_t
-basic_block ()
+uint32_t basic_block ()
 {
   op = OPCODE_AT (program_counter);
 
@@ -665,8 +626,7 @@ basic_block ()
 // ------------------------------------------------------------------------
 
 #ifndef CHIP8_RUNTIME
-int
-main (int argc, const char *argv[])
+int main (int argc, const char *argv[])
 {
   FILE *fp;
   int inst_count = 0;

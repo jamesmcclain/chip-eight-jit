@@ -7,22 +7,19 @@
 #include <string.h>
 #include "chip8.h"
 
-static void
-die (const char *s)
+static void die (const char *s)
 {
   fprintf (stderr, "chip8-aot: %s\n", s);
   exit (1);
 }
 
 static unsigned ptr_mask, load_mask;
-static void
-next (FILE *f, unsigned pc)
+static void next (FILE *f, unsigned pc)
 {
   fprintf (f, "  store i16 %u, ptr @program_counter\n  br label %%dispatch\n\n", pc + 2);
 }
 
-static void
-regptr (FILE *f, unsigned pc, unsigned r)
+static void regptr (FILE *f, unsigned pc, unsigned r)
 {
   if (!(ptr_mask & (1u << r)))
     {
@@ -31,8 +28,7 @@ regptr (FILE *f, unsigned pc, unsigned r)
     }
 }
 
-static void
-loadreg (FILE *f, unsigned pc, unsigned r)
+static void loadreg (FILE *f, unsigned pc, unsigned r)
 {
   regptr (f, pc, r);
   if (!(load_mask & (1u << r)))
@@ -42,8 +38,7 @@ loadreg (FILE *f, unsigned pc, unsigned r)
     }
 }
 
-static void
-block (FILE *f, unsigned pc, uint16_t op)
+static void block (FILE *f, unsigned pc, uint16_t op)
 {
   ptr_mask = load_mask = 0;
   unsigned x = (op >> 8) & 15, y = (op >> 4) & 15, n = op & 15, kk = op & 255, nnn = op & 4095;
@@ -125,8 +120,7 @@ block (FILE *f, unsigned pc, uint16_t op)
     }
 }
 
-int
-main (int ac, char **av)
+int main (int ac, char **av)
 {
   const char *target = NULL;
   uint8_t rom[MEMORY_SIZE - ENTRYPOINT];
