@@ -49,6 +49,20 @@ Override the LLVM config binary if needed. For example, use `make LLVM_CONFIG=ll
 ./chip8-libgccjit path/to/rom.ch8
 ```
 
+### AOT LLVM IR
+
+`chip8-aot` converts an immutable CHIP-8 ROM into a textual LLVM module. The module contains a ROM-specific program-counter dispatcher. It links to a runtime for VM state, timers, input, and ncurses display output.
+
+```sh
+make -C src chip8-aot aot-runtime-objs
+src/chip8-aot roms/PONG -o pong.ll
+llvm-as-20 pong.ll -o pong.bc
+clang pong.ll src/aot_runtime.o src/interp.runtime.o src/chip8.o src/ncurses_io.o -lncurses -o pong
+./pong
+```
+
+The compiler rejects empty, odd-byte, and oversized ROMs. The runtime verifies that each opcode still matches the opcode embedded in `pong.ll`. It stops if code memory changed. Do not submit self-modifying ROMs.
+
 The emulator renders the display with ncurses (64x32). The 16 CHIP-8 keys map to `0`-`9` and `a`-`f`. Press `q` or `Escape` to quit. On exit the emulator writes the register file, program counter, address register, and timers to stderr.
 
 ## Benchmarking and differential testing

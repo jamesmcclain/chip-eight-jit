@@ -608,6 +608,7 @@ uint32_t basic_block()
 
 // ------------------------------------------------------------------------
 
+#ifndef CHIP8_RUNTIME
 int main(int argc, const char * argv[])
 {
   FILE * fp;
@@ -688,3 +689,4 @@ int main(int argc, const char * argv[])
 
   exit(0);
 }
+#endif /* CHIP8_RUNTIME */
