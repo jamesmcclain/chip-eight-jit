@@ -28,4 +28,6 @@ per ROM, and reports median per-ROM rates plus their geometric mean.
 - Preserve BENCH retired-count semantics.
 
 ## What's Been Tried
-- Baseline pending.
+- Baseline geometric mean: about 50 Minsn/s (PONG ~103, TETRIS ~52, BLINKY ~24), with appreciable host noise.
+- Replacing all regs[] accesses with 16 local allocas and spilling/reloading all registers at every call and trace return was correct on the three-ROM differential suite but regressed to ~26 Minsn/s. Omitting barriers for safepoint, timer, clear, and return helpers improved only to ~32 Minsn/s. Discarded. The all-register exit barrier and/or generated code needs inspection before retrying that shape.
+- Next: isolate a V0-only promotion to measure whether trace-exit materialization alone defeats the gain.

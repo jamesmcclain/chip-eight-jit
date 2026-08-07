@@ -1,0 +1,1 @@
+{"experiment":"V0-only alloca promotion","result":"crash","detail":"The macro prototype did not compile: the temporary host-pointer macro was missing. Discarded; keep the baseline tree clean."}
