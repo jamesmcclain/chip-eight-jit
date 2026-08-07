@@ -13,6 +13,7 @@ rom=$1
 output=$2
 compiler="$root/src/chip8-aot"
 clang=${CLANG:-clang}
+target=$("$clang" -dumpmachine)
 
 for file in "$compiler" "$root/src/aot_runtime.o" "$root/src/chip8.o" "$root/src/ncurses_io.o"; do
     if [ ! -e "$file" ]; then
@@ -23,6 +24,6 @@ done
 
 ir=$(mktemp "${TMPDIR:-/tmp}/chip8-aot.XXXXXX.ll")
 trap 'rm -f "$ir"' EXIT HUP INT TERM
-"$compiler" "$rom" -o "$ir"
+"$compiler" "$rom" -o "$ir" --target "$target"
 "$clang" "$ir" "$root/src/aot_runtime.o" "$root/src/chip8.o" \
     "$root/src/ncurses_io.o" -lncurses -o "$output"

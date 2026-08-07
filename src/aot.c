@@ -36,8 +36,15 @@ static void block(FILE *f, unsigned pc, uint16_t op) {
   }
 }
 int main(int ac,char **av) {
+  const char *target = NULL;
   uint8_t rom[MEMORY_SIZE-ENTRYPOINT]; size_t z; FILE *in,*out;
-  if(ac!=4||strcmp(av[2],"-o")){fprintf(stderr,"Usage: %s ROM -o OUTPUT.ll\n",av[0]);return 1;} if(!(in=fopen(av[1],"rb")))die(strerror(errno)); z=fread(rom,1,sizeof rom,in);if(ferror(in)||fgetc(in)!=EOF)die("invalid ROM");fclose(in);if(!z||(z&1))die("ROM size must be a nonzero even number");if(!(out=fopen(av[3],"w")))die(strerror(errno));
-  fprintf(out,"; Generated AOT code -- no opcode dispatcher is linked.\n@regs = external global [16 x i8]\n@addr = external global i16\n@program_counter = external global i16\ndeclare i1 @chip8_aot_retire()\ndeclare void @chip8_aot_clear()\ndeclare void @chip8_aot_return()\ndeclare void @chip8_aot_call(i16,i16)\ndeclare void @chip8_aot_alu(i8,i8,i8)\ndeclare void @chip8_aot_random(i8,i8)\ndeclare void @chip8_aot_draw(i8,i8,i8)\ndeclare void @chip8_aot_key(i8,i1)\ndeclare void @chip8_aot_f(i8,i8)\ndeclare void @chip8_aot_bad(i16,i16)\n");
+  if ((ac != 4 && ac != 6) || strcmp(av[2], "-o") ||
+      (ac == 6 && strcmp(av[4], "--target")))
+    { fprintf(stderr, "Usage: %s ROM -o OUTPUT.ll [--target TRIPLE]\n", av[0]); return 1; }
+  if (ac == 6) target = av[5];
+  if(!(in=fopen(av[1],"rb")))die(strerror(errno)); z=fread(rom,1,sizeof rom,in);if(ferror(in)||fgetc(in)!=EOF)die("invalid ROM");fclose(in);if(!z||(z&1))die("ROM size must be a nonzero even number");if(!(out=fopen(av[3],"w")))die(strerror(errno));
+  fprintf(out,"; Generated AOT code -- no opcode dispatcher is linked.\n");
+  if (target != NULL) fprintf(out, "target triple = \"%s\"\n", target);
+  fprintf(out,"@regs = external global [16 x i8]\n@addr = external global i16\n@program_counter = external global i16\ndeclare i1 @chip8_aot_retire()\ndeclare void @chip8_aot_clear()\ndeclare void @chip8_aot_return()\ndeclare void @chip8_aot_call(i16,i16)\ndeclare void @chip8_aot_alu(i8,i8,i8)\ndeclare void @chip8_aot_random(i8,i8)\ndeclare void @chip8_aot_draw(i8,i8,i8)\ndeclare void @chip8_aot_key(i8,i1)\ndeclare void @chip8_aot_f(i8,i8)\ndeclare void @chip8_aot_bad(i16,i16)\n");
   fprintf(out,"@chip8_aot_rom = constant [%zu x i8] [",z);for(size_t i=0;i<z;i++)fprintf(out,"%si8 %u",i?", ":"",rom[i]);fprintf(out,"]\n@chip8_aot_rom_size = constant i32 %zu\ndefine void @chip8_aot_run() {\nentry: br label %%dispatch\ndispatch:\n  %%pc = load i16, ptr @program_counter\n  switch i16 %%pc, label %%exit [\n",z);for(size_t i=0;i<z;i+=2)fprintf(out,"    i16 %zu, label %%pc%zx\n",ENTRYPOINT+i,ENTRYPOINT+i);fprintf(out,"  ]\n\n");for(size_t i=0;i<z;i+=2)block(out,ENTRYPOINT+i,(rom[i]<<8)|rom[i+1]);fprintf(out,"exit: ret void\n}\n");if(fclose(out))die("cannot write LLVM IR");return 0;
 }
