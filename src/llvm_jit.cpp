@@ -1082,8 +1082,8 @@ code codegen(std::unique_ptr<llvm::orc::LLJIT> & JIT)
  trace_terminated: // the current block was already terminated by a closed back edge
 
   // An opt-in trace dump is the microscope for code-generator experiments.
-  // Restrict it to the entry trace, otherwise a benchmark produces a corpse
-  // pile of IR rather than evidence.
+  // Restrict it to the entry trace, otherwise a benchmark produces a lot of
+  // IR rather than evidence.
   const char *dump_ir_pc = getenv("LLVM_JIT_DUMP_IR");
   bool dump_ir = dump_ir_pc != nullptr &&
                  (!strcmp(dump_ir_pc, "*") ||
