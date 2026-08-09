@@ -40,7 +40,8 @@
 #include <stdint.h>
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C"
+{
 #endif
 
 /* Virtual 60 Hz tick length, in instruction-equivalents. Roughly the work a
@@ -64,70 +65,71 @@ extern "C" {
    clock. Guards ROMs that park in Fx0A and retire almost nothing. */
 #define BENCH_CLOCK_CAP_FACTOR (64)
 
-enum { BENCH_KEYS_NONE = 0, BENCH_KEYS_ROTATE = 1 };
+  enum
+  { BENCH_KEYS_NONE = 0, BENCH_KEYS_ROTATE = 1 };
 
 /* The virtual clock is bench_retired + bench_poll_clock. Splitting it in two
    keeps the JIT-emitted accounting down to a single increment per CHIP-8
    instruction: traces touch bench_retired only, and the poll charge is added
    by the I/O layer. */
-extern long long bench_retired;    /* architectural CHIP-8 instructions */
-extern long long bench_poll_clock; /* clock charged for input polls */
-extern long long bench_budget;     /* stop once bench_retired reaches this */
-extern long long bench_clock_cap;  /* stop once the virtual clock reaches this */
-extern volatile long long bench_next_safepoint; /* next JIT slow-path check */
+  extern long long bench_retired;	/* architectural CHIP-8 instructions */
+  extern long long bench_poll_clock;	/* clock charged for input polls */
+  extern long long bench_budget;	/* stop once bench_retired reaches this */
+  extern long long bench_clock_cap;	/* stop once the virtual clock reaches this */
+  extern volatile long long bench_next_safepoint;	/* next JIT slow-path check */
 
 #define bench_now() (bench_retired + bench_poll_clock)
 /* Traces compiled and trace-cache flushes: JIT compile pressure is a first
    class cost in an emulator, and self-modifying writes discard the whole
    cache, so both belong in any A/B comparison. */
-extern long long bench_compiled;
-extern long long bench_flushes;
-extern unsigned  bench_seed;
-extern int       bench_key_mode;
+  extern long long bench_compiled;
+  extern long long bench_flushes;
+  extern unsigned bench_seed;
+  extern int bench_key_mode;
 
 /* Parse the bench flags out of argv and store the ROM path in *rom.
    Returns 0 on success, non-zero if usage was wrong. */
-int bench_parse_args(int argc, const char *argv[], const char **rom);
+  int bench_parse_args (int argc, const char *argv[], const char **rom);
 
 /* Non-zero once the instruction budget or the clock cap has been reached. */
-int bench_done(void);
+  int bench_done (void);
 
 /* Advance the deterministic JIT safepoint schedule beyond bench_retired. */
-void bench_advance_safepoint(void);
+  void bench_advance_safepoint (void);
 
 /* The virtual 60 Hz tick, replacing the wall-clock tick(). */
-int bench_tick(void);
+  int bench_tick (void);
 
 /* Charge the virtual clock for one input poll and return the synthesised
    key state for the current virtual tick. Used by the Fx0A spin loops, whose
    polling is the only thing keeping the clock moving while no instruction
    retires. */
-uint32_t bench_poll_keys(void);
+  uint32_t bench_poll_keys (void);
 
 /* The key state for the current virtual tick, with any keys cleared during
    this tick masked off. A pure function of the virtual clock (and of the
    clears, which happen on the same instructions in every engine), so it does
    not matter how often an engine happens to poll -- which is what keeps the
    interpreter and the JITs in step. */
-uint32_t bench_keys_now(void);
-void bench_clear_key(uint8_t key);
+  uint32_t bench_keys_now (void);
+  void bench_clear_key (uint8_t key);
 
 /* FNV-1a over the visible framebuffer: a cheap whole-screen comparison that
    works without a terminal. */
-uint64_t bench_display_hash(void);
+  uint64_t bench_display_hash (void);
 
 /* Catch the 60 Hz timers up to the virtual clock. Defined by each engine,
    which owns delay_timer/sound_timer/last_tick; called from every timer
    access and from bench_report, so a reported timer is never stale by an
    engine-specific amount. */
-void sync_timers(void);
+  void sync_timers (void);
 
 /* Print the machine state plus the benchmark counters. */
-void bench_report(const char *engine, const char *counter_label, int counter);
+  void bench_report (const char *engine, const char *counter_label, int counter);
 
 #if defined(__cplusplus)
 }
 #endif
 
-#endif /* BENCH */
+#endif				/* BENCH */
 #endif

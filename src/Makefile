@@ -1,5 +1,8 @@
 DEPFLAGS = -MMD -MP
 CFLAGS ?= -Wall -O -g $(DEPFLAGS)
+# aot_compile.sh links these objects into a compiler-driver PIE on toolchains
+# that enable PIE by default.  Keep every reusable object position-independent.
+override CFLAGS += -fPIC
 CXXFLAGS += $(DEPFLAGS)
 CC = gcc
 CXX = g++
@@ -8,7 +11,7 @@ LLVM_CONFIG ?= llvm-config-20
 LLVM_LIBS = $(shell $(LLVM_CONFIG) --ldflags --system-libs --libs core orcjit native)
 GCCJIT_LIBS = -lgccjit
 
-all: chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm
+all: chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm chip8-aot aot-runtime-objs
 
 # Deterministic benchmark / differential-test builds: same engines, headless
 # I/O, virtual clock, fixed seed, instruction budget. See bench.h.
@@ -28,6 +31,14 @@ chip8-disas: disas.o
 
 chip8-asm: asm.o
 	$(CC) $^ $(LDFLAGS) -o $@
+
+# chip8-aot writes a textual LLVM module. Link generated code only with the
+# AOT host services and VM/I/O state; interp.o is intentionally not involved.
+# Example: clang pong.ll aot_runtime.o chip8.o ncurses_io.o -lncurses -o pong
+chip8-aot: aot.o
+	$(CC) $^ $(LDFLAGS) -o $@
+
+aot-runtime-objs: aot_runtime.o chip8.o ncurses_io.o
 
 llvm_jit.o: llvm_jit.cpp
 	$(CXX) $(CFLAGS) $(CXXSTD) $(CXXFLAGS) $(shell $(LLVM_CONFIG) --cxxflags) $< -c -o $@
@@ -53,14 +64,15 @@ llvm_jit.bench.o: llvm_jit.cpp
 test: chip8-asm chip8-disas
 	python3 ../tests/test_asm.py
 	python3 ../tests/test_opt.py
+	python3 ../tests/test_aot.py
 
 clean:
 	rm -f *.o *.d
 
 cleanest: clean
-	rm -f chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm
+	rm -f chip8-interp chip8-llvm chip8-libgccjit chip8-disas chip8-asm chip8-aot
 	rm -f chip8-interp-bench chip8-llvm-bench chip8-libgccjit-bench
 
-.PHONY: all bench test clean cleanest
+.PHONY: all bench test clean cleanest aot-runtime-objs
 
 -include $(wildcard *.d)

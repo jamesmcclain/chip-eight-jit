@@ -20,22 +20,23 @@
 #define MEM_AT(a) memory[(a) & (MEMORY_SIZE - 1)]
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C"
+{
 #endif
 
-extern uint16_t stack[];
-extern uint8_t memory[];
-extern uint8_t regs[];
+  extern uint16_t stack[];
+  extern uint8_t memory[];
+  extern uint8_t regs[];
 
-extern uint8_t delay_timer;
-extern uint8_t sound_timer;
-extern int8_t stack_pointer;
-extern uint16_t addr;
-extern uint16_t program_counter;
+  extern uint8_t delay_timer;
+  extern uint8_t sound_timer;
+  extern int8_t stack_pointer;
+  extern uint16_t addr;
+  extern uint16_t program_counter;
 
-void init_chip8();
-void deinit_chip8();
-void dump_chip8_state(const char *counter_label, int counter);
+  void init_chip8 ();
+  void deinit_chip8 ();
+  void dump_chip8_state (const char *counter_label, int counter);
 
 #if defined(__cplusplus)
 }
