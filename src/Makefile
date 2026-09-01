@@ -65,6 +65,7 @@ test: chip8-asm chip8-disas
 	python3 ../tests/test_asm.py
 	python3 ../tests/test_opt.py
 	python3 ../tests/test_aot.py
+	python3 ../tests/test_quirks.py
 
 clean:
 	rm -f *.o *.d

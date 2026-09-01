@@ -49,6 +49,16 @@ Override the LLVM config binary if needed. For example, use `make LLVM_CONFIG=ll
 ./chip8-libgccjit path/to/rom.ch8
 ```
 
+### `--elide-idle`
+
+Pass `--elide-idle` to any of the three interactive engines to recognize the
+canonical delay-timer poll loop (`Fx07` / `SE Vx, 0` / `JP` back to the
+`Fx07`, the shape Octo emits for `loop  vf := delay  if vf != 0 then  again`)
+and wait for the timer instead of spinning it. The end state is identical; the
+engine just stops burning a core while a ROM idles between frames. The flag is
+off by default and has no effect in the `-DBENCH` builds, so differential
+testing always compares the un-elided spin.
+
 ### AOT LLVM IR
 
 `chip8-aot` converts an immutable CHIP-8 ROM into a textual LLVM module. The module contains a ROM-specific program-counter dispatcher. It links to a runtime for VM state, timers, input, and ncurses display output.
@@ -164,7 +174,10 @@ CHIP-8 has several well-known compatibility splits. This emulator makes explicit
 | `8xy5/8xy7` borrow | **NOT-borrow**: `VF = Vx >= Vy` (or `Vy >= Vx`) | Many ROMs expect `>=`, not strict `>`. |
 | `Fx55/Fx65`, `Fx33`, `Dxyn` + `Annn`/`Fx1E` | **12-bit wrap via `MEM_AT`**: address masked with `0xFFF` | COSMAC VIP 12-bit wrap. This rule also prevents OOB host access. |
 | `Bnnn` | `PC = nnn + V0` with zero-extend | LLVM backend previously failed to extend `V0`. |
+| `Fx29` (`LD F, Vx`) | **Mask to low nibble**: `addr = (Vx & 0x0F) * 5` | "The Art of CHIP-8" warns against `Vx > 15`; masking keeps the font pointer well defined and identical across engines. |
 | Timers | `uint8_t`, 0..255, decrement only when >0 | Signed timers previously hung on values >127. |
+
+Sound is tracked but never emitted; see `docs/unimplemented.md`.
 
 ## Layout
 
