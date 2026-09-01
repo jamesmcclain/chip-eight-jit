@@ -10,6 +10,7 @@
 #include "chip8.h"
 #include "bench.h"
 #include "io.h"
+#include "idle.h"
 
 // ------------------------------------------------------------------------
 // Opcode decode helpers (compile-time, mirror the LLVM backend)
@@ -36,6 +37,11 @@ uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 int program_over = 0;
 volatile sig_atomic_t smc_pending = 0;
+
+// Opt-in (--elide-idle): compile a recognized delay-timer poll loop to a
+// jit_idle_wait() call instead of a native spin. Set once at startup, read at
+// codegen time. No effect under BENCH.
+int elide_idle = 0;
 
 // Bytes the compiler has read while building a trace still in the cache.
 //
@@ -247,6 +253,33 @@ void check_interrupt ()
     }
 #endif
 }
+
+#ifndef BENCH
+// Called from a compiled trace in place of spinning a delay-timer poll loop.
+// program_counter has already been set to the loop header, so the polled
+// register is recovered from there. Service timers and input on a
+// few-millisecond cadence until the timer expires or the quit key lands (which
+// a closed back edge only sees via program_over), then zero the register so
+// the branch back to the header falls straight out of the loop.
+void jit_idle_wait (void)
+{
+  uint8_t reg;
+
+  if (!chip8_idle_delay_loop (program_counter, &reg))
+    return;
+  while (delay_timer != 0)
+    {
+      if (all_keys_down () & (1u << 31))
+	{
+	  program_over = 1;
+	  break;
+	}
+      usleep (NANOS_PER_TICK / 4000);
+      interrupt ();
+    }
+  regs[reg] = 0;
+}
+#endif
 
 #ifdef BENCH
 void bench_safepoint (void)
@@ -472,6 +505,8 @@ static const char *HOST_FNS[] = {
   "save_registers", "restore_registers",
 #ifdef BENCH
   "sync_timers",
+#else
+  "jit_idle_wait",
 #endif
 };
 
@@ -642,6 +677,21 @@ code codegen (void)
       gcc_jit_block_end_with_void_return(exit_blk, NULL); \
     } while (0)
 
+  // Just before closing a back edge onto `header`: if --elide-idle is set and
+  // `header` begins the canonical delay-timer poll loop, emit a jit_idle_wait()
+  // call. PC_LVAL has already been set to `header`, so the helper can recover
+  // the polled register. No effect under BENCH.
+#ifdef BENCH
+#define MAYBE_IDLE_WAIT(header) do { } while (0)
+#else
+#define MAYBE_IDLE_WAIT(header) \
+    do { \
+      uint8_t idle_reg_; \
+      if (elide_idle && chip8_idle_delay_loop((header), &idle_reg_)) \
+        CALL_HOST("jit_idle_wait"); \
+    } while (0)
+#endif
+
   // Bench builds account for architectural CHIP-8 instructions so that the
   // virtual clock matches the interpreter's. The count is of instructions the
   // trace stands in for, not of emitted operations: a peephole that folds two
@@ -677,6 +727,7 @@ code codegen (void)
 	  // timers serviced once per iteration, exactly as the jump case does.
 	  SAFEPOINT ();
 	  gcc_jit_block_add_assignment (blk, NULL, PC_LVAL, gcc_jit_context_new_rvalue_from_int (ctx, t_u16, pc));
+	  MAYBE_IDLE_WAIT (pc);
 	  CLOSE_BACKEDGE (pc_block[pc]);
 	  goto trace_terminated;
 	}
@@ -728,6 +779,7 @@ code codegen (void)
 		// whole loop now runs as one native loop, where it used to
 		// cost a dispatcher round trip (and, for a self-loop, a
 		// trace-cache lookup) on every single iteration.
+		MAYBE_IDLE_WAIT (immediate);
 		CLOSE_BACKEDGE (pc_block[immediate]);
 		goto trace_terminated;
 	      }
@@ -803,6 +855,7 @@ code codegen (void)
 		    // The fused edge is a loop back-edge, which is what this
 		    // shape almost always is: `skip ; JP top` is how CHIP-8
 		    // spells "loop while". Close it.
+		    MAYBE_IDLE_WAIT (fused_target);
 		    CLOSE_BACKEDGE (pc_block[fused_target]);
 		  }
 		else
@@ -1000,12 +1053,14 @@ code codegen (void)
 		  STEP_AND_CONTINUE;
 		}
 	      case 0x29:
-		{		// addr = Vx * 5 (font sprite)
+		{		// addr = (Vx & 0x0f) * 5 (font sprite)
 		  X;
 		  gcc_jit_rvalue *vx = gcc_jit_lvalue_as_rvalue (mem (ctx, t_u8p, &regs[x]));
 		  gcc_jit_rvalue *vx16 = gcc_jit_context_new_cast (ctx, NULL, vx, t_u16);
+		  /* Fx29: mask to a valid hex digit (see "The Art of CHIP-8"). */
+		  gcc_jit_rvalue *nibble = gcc_jit_context_new_binary_op (ctx, NULL, GCC_JIT_BINARY_OP_BITWISE_AND, t_u16, vx16, gcc_jit_context_new_rvalue_from_int (ctx, t_u16, 0x0f));
 		  gcc_jit_rvalue *five = gcc_jit_context_new_rvalue_from_int (ctx, t_u16, 5);
-		  gcc_jit_block_add_assignment (blk, NULL, mem (ctx, t_u16p, &addr), gcc_jit_context_new_binary_op (ctx, NULL, GCC_JIT_BINARY_OP_MULT, t_u16, vx16, five));
+		  gcc_jit_block_add_assignment (blk, NULL, mem (ctx, t_u16p, &addr), gcc_jit_context_new_binary_op (ctx, NULL, GCC_JIT_BINARY_OP_MULT, t_u16, nibble, five));
 		  STEP_AND_CONTINUE;
 		}
 	      case 0x33:
@@ -1079,12 +1134,19 @@ int main (int argc, const char *argv[])
       exit (-1);
     }
 #else
-  if (argc <= 1)
+  rom = NULL;
+  for (int i = 1; i < argc; ++i)
     {
-      fprintf (stderr, "Usage: %s <rom>\n", argv[0]);
+      if (strcmp (argv[i], "--elide-idle") == 0)
+	elide_idle = 1;
+      else if (rom == NULL)
+	rom = argv[i];
+    }
+  if (rom == NULL)
+    {
+      fprintf (stderr, "Usage: %s [--elide-idle] <rom>\n", argv[0]);
       exit (-1);
     }
-  rom = argv[1];
 #endif
 
   // Load program

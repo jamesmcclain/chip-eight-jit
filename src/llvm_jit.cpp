@@ -8,6 +8,7 @@
 #include "chip8.h"
 #include "bench.h"
 #include "io.h"
+#include "idle.h"
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/Support/InitLLVM.h"
@@ -181,6 +182,21 @@
     JIT_RETURN; \
   }
 
+// Just before closing a back edge onto `header`: if --elide-idle is set and
+// `header` begins the canonical delay-timer poll loop, emit a jit_idle_wait()
+// call. The VM program counter has already been stored as `header`, so the
+// helper can recover the polled register. No effect under BENCH.
+#ifdef BENCH
+#define JIT_MAYBE_IDLE_WAIT(header) do { } while (0)
+#else
+#define JIT_MAYBE_IDLE_WAIT(header) \
+  do { \
+    uint8_t idle_reg_; \
+    if (elide_idle && chip8_idle_delay_loop ((header), &idle_reg_)) \
+      { JIT_CALL ("jit_idle_wait"); } \
+  } while (0)
+#endif
+
 // ------------------------------------------------------------------------
 
 int last_tick = 0;
@@ -191,6 +207,11 @@ uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
 bool program_over = false;
 volatile sig_atomic_t smc_pending = 0;
+
+// Opt-in (--elide-idle): compile a recognized delay-timer poll loop to a
+// jit_idle_wait() call instead of a native spin. Set once at startup, read at
+// codegen time. No effect under BENCH.
+int elide_idle = 0;
 
 // Bytes the compiler has read while building a trace still in the cache.
 //
@@ -403,6 +424,32 @@ extern "C"
     check_interrupt ();
     bench_advance_safepoint ();
   }
+#else
+  // Called from a compiled trace in place of spinning a delay-timer poll
+  // loop. program_counter has already been set to the loop header, so the
+  // polled register is recovered from there. Service timers and input on a
+  // few-millisecond cadence until the timer expires or the quit key lands,
+  // then zero the register so the branch back to the header falls straight
+  // out of the loop.
+  void jit_idle_wait ()
+  {
+    uint8_t reg;
+    if (!chip8_idle_delay_loop (program_counter, &reg))
+      return;
+    while (delay_timer != 0)
+      {
+	if (all_keys_down () & (1u << 31))
+	  {
+	    // A closed back edge only tests program_over; set it here or the
+	    // trace would resume spinning after this returns.
+	    program_over = true;
+	    break;
+	  }
+	usleep (NANOS_PER_TICK / 4000);
+	interrupt ();
+      }
+    regs[reg] = 0;
+  }
 #endif
 
   void errer ()
@@ -590,7 +637,7 @@ extern "C"
     OP;
     X;
 
-    addr = regs[x] * 5;
+    addr = (regs[x] & 0x0f) * 5;	/* Fx29: mask to a valid hex digit */
     STEP;
   }
 
@@ -654,6 +701,7 @@ code codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 	  JIT_SAFEPOINT;
 	  JIT_GETPTR16 (program_counter);
 	  builder->CreateStore (builder->getInt16 (pc), JIT_PTR (program_counter));
+	  JIT_MAYBE_IDLE_WAIT (pc);
 	  JIT_CLOSE_BACKEDGE (pc_block[pc]);
 	  goto trace_terminated;
 	}
@@ -705,6 +753,7 @@ code codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		// loop now runs as one native loop, where it used to cost a
 		// dispatcher round trip (and, for a self-loop, a trace-cache
 		// lookup) on every single iteration.
+		JIT_MAYBE_IDLE_WAIT (immediate);
 		JIT_CLOSE_BACKEDGE (pc_block[immediate]);
 		goto trace_terminated;
 	      }
@@ -804,6 +853,7 @@ code codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		    // The fused edge is a loop back-edge, which is what this
 		    // shape almost always is: `skip ; JP top` is how CHIP-8
 		    // spells "loop while". Close it.
+		    JIT_MAYBE_IDLE_WAIT (fused_target);
 		    JIT_CLOSE_BACKEDGE (pc_block[fused_target]);
 		  }
 		else
@@ -1114,7 +1164,9 @@ code codegen (std::unique_ptr < llvm::orc::LLJIT > &JIT)
 		  JIT_GETPTR16 (addr);
 		  auto five_value = builder->getInt16 (5);
 		  auto x16_value = builder->CreateZExt (JIT_VALUE (x), int16ty);
-		  auto prod_value = builder->CreateMul (x16_value, five_value);
+		  /* Fx29: mask to a valid hex digit (see "The Art of CHIP-8"). */
+		  auto nibble_value = builder->CreateAnd (x16_value, builder->getInt16 (0x0f));
+		  auto prod_value = builder->CreateMul (nibble_value, five_value);
 		  builder->CreateStore (prod_value, JIT_PTR (addr));
 		  JIT_STEP;
 		}
@@ -1225,12 +1277,19 @@ int main (int argc, const char *argv[])
       exit (-1);
     }
 #else
-  if (argc <= 1)
+  rom = nullptr;
+  for (int i = 1; i < argc; ++i)
     {
-      fprintf (stderr, "Usage: %s <rom>\n", argv[0]);
+      if (strcmp (argv[i], "--elide-idle") == 0)
+	elide_idle = 1;
+      else if (rom == nullptr)
+	rom = argv[i];
+    }
+  if (rom == nullptr)
+    {
+      fprintf (stderr, "Usage: %s [--elide-idle] <rom>\n", argv[0]);
       exit (-1);
     }
-  rom = argv[1];
 #endif
 
   // Load program

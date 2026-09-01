@@ -224,7 +224,7 @@ void chip8_aot_f (uint8_t x, uint8_t k)
       addr += regs[x];
       break;
     case 41:
-      addr = regs[x] * 5;
+      addr = (regs[x] & 0x0f) * 5;	/* Fx29: mask to a valid hex digit */
       break;
     case 51:
       {

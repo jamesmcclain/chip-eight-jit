@@ -29,6 +29,10 @@ def test_canonicalize_round_trip_real_roms():
 
 
 def test_peephole_loop_accepts_pong_and_tetris():
+    # PONG has nothing to rewrite; TETRIS has three CALL block334 / RET tail
+    # calls that become JP block334.  Either way the optimized source must
+    # assemble to a ROM of the same size and disassemble cleanly.
+    expected_changes = {"PONG": 0, "TETRIS": 3}
     for rom_name in ("PONG", "TETRIS"):
         original = (ROOT / "roms" / rom_name).read_bytes()
         with tempfile.TemporaryDirectory() as directory:
@@ -36,8 +40,40 @@ def test_peephole_loop_accepts_pong_and_tetris():
             source = directory / "input.asm"
             optimized = directory / "optimized.asm"
             source.write_bytes(run(DISAS, "--asm", ROOT / "roms" / rom_name))
-            subprocess.check_call([OPT, "optimize", source, "-o", optimized])
-            assert run(ASM, optimized) == original, rom_name
+            report = subprocess.run([OPT, "optimize", source, "-o", optimized],
+                                    stderr=subprocess.PIPE, text=True).stderr
+            rebuilt = run(ASM, optimized)
+        assert len(rebuilt) == len(original), rom_name
+        tail_calls = report.count("tail call CALL -> JP")
+        assert tail_calls == expected_changes[rom_name], (rom_name, report)
+        if expected_changes[rom_name] == 0:
+            assert rebuilt == original, rom_name
+        else:
+            # Every changed byte is a CALL (0x2nnn) turned into a JP (0x1nnn).
+            diffs = [(a, b) for a, b in zip(original, rebuilt) if a != b]
+            assert len(diffs) == expected_changes[rom_name], (rom_name, diffs)
+            assert all(a & 0xF0 == 0x20 and b & 0xF0 == 0x10 and a & 0x0F == b & 0x0F
+                       for a, b in diffs), (rom_name, diffs)
+
+
+def test_tail_call_elimination_rewrites_only_the_tail_site():
+    source = """\
+start: CALL helper
+RET
+middle: LD V0, 1
+CALL helper
+ADD V0, 1
+helper: LD V1, 2
+RET
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        directory = pathlib.Path(directory)
+        original = directory / "input.asm"
+        optimized = directory / "optimized.asm"
+        original.write_text(source)
+        subprocess.check_call([OPT, "optimize", original, "-o", optimized])
+        # CALL at 0x200 (-> JP), CALL at 0x206 left alone; RET kept in place.
+        assert run(ASM, optimized) == bytes.fromhex("120a 00ee 6001 220a 7001 6102 00ee")
 
 
 def test_analyzer_tracks_i_through_call_and_return():
@@ -152,6 +188,8 @@ def test_analyzer_marks_dynamic_control_flow():
 
 if __name__ == "__main__":
     test_canonicalize_round_trip_real_roms()
+    test_peephole_loop_accepts_pong_and_tetris()
+    test_tail_call_elimination_rewrites_only_the_tail_site()
     test_analyzer_reports_static_rom_write_and_cfg()
     test_analyzer_marks_dynamic_control_flow()
     print("chip8opt tests: OK")

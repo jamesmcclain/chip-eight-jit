@@ -368,7 +368,11 @@ def is_register(word: str) -> bool:
 
 
 def optimize_peepholes(statements: list[Statement], labels: dict[str, int]) -> tuple[list[Statement], list[str]]:
-    """Apply small, proven byte-removing rewrites to relocatable source."""
+    """Apply small, proven rewrites to relocatable source.
+
+    Most remove bytes; the tail-call rewrite is byte-neutral but strictly
+    cheaper at run time.
+    """
     statements, labels = symbolize_in_rom_addresses(statements, labels)
     problems = relocation_hazards(statements, labels)
     if problems:
@@ -392,6 +396,21 @@ def optimize_peepholes(statements: list[Statement], labels: dict[str, int]) -> t
             result.append(Statement(s.line, s.label, "LD", [s.args[0], f"0x{total:02X}"], s.pc, 2))
             changes.append(f"0x{s.pc:03X}: folded LD/ADD for {s.args[0]}")
             i += 2
+            continue
+        # Octo-style tail-call elimination: CALL x immediately followed by a
+        # RET is a jump to x.  When x returns it unwinds straight to this
+        # routine's caller, skipping the intermediate RET, so the two forms
+        # are equivalent.  Byte-neutral (CALL and JP are both two bytes), but
+        # it removes a return-stack push/pop and a dispatch per hit.  The RET
+        # stays put: other paths may still reach it, and removing now-dead
+        # bytes is a separate pass.  Safe here because optimize_peepholes has
+        # already rejected every relocation hazard first -- computed JP, deep
+        # recursion, self-modifying code, unresolved targets.
+        if (next_s and s.op == "CALL" and next_s.op == "RET"
+                and len(s.args) == 1 and target(s, labels) is not None):
+            result.append(Statement(s.line, s.label, "JP", list(s.args), s.pc, 2))
+            changes.append(f"0x{s.pc:03X}: tail call CALL -> JP {s.args[0]}")
+            i += 1
             continue
         # These instructions have no side effects. Labels are retained as
         # boundaries; a later relocation pass can handle label coalescing.

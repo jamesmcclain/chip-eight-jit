@@ -10,6 +10,7 @@ import os, pty, fcntl, termios, struct, time, sys, select
 
 def main():
     engine, rom = sys.argv[1], sys.argv[2]
+    extra = sys.argv[3:]  # e.g. engine flags such as --elide-idle
     master, slave = pty.openpty()
     err_r, err_w = os.pipe()
     pid = os.fork()
@@ -17,7 +18,7 @@ def main():
         os.close(master); os.close(err_r)
         os.dup2(slave, 0); os.dup2(slave, 1); os.dup2(err_w, 2)
         os.close(slave); os.close(err_w)
-        os.execvp(engine, [engine, rom])
+        os.execvp(engine, [engine, *extra, rom])
         os._exit(127)
     # parent
     os.close(slave); os.close(err_w)

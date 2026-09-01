@@ -7,6 +7,7 @@
 #include "chip8.h"
 #include "io.h"
 #include "bench.h"
+#include "idle.h"
 
 #define ERROR {return (op << 16) | program_counter;}
 #define STEP {program_counter+=2; return 0;}
@@ -27,6 +28,11 @@ uint16_t op = 0;
 #define INPUT_TICKS (10)	// roughly 1/6 window for input
 uint32_t keys_down[INPUT_TICKS];
 int interrupt_count = 0;
+
+// Opt-in (--elide-idle): recognize a pure delay-timer poll loop and wait for
+// the timer instead of spinning the loop. Interactive builds only; BENCH keeps
+// the naive spin so the differential comparison is unaffected.
+int elide_idle = 0;
 
 
 void clear_key (uint8_t key)
@@ -112,6 +118,23 @@ void interrupt ()
   interrupt_count = (interrupt_count + 1) % INPUT_TICKS;
 #endif
 }
+
+#ifndef BENCH
+// Wait out a recognized delay-timer poll loop without spinning. Service the
+// 60 Hz timers and the keyboard on each pass, bail on the quit key, and leave
+// the polled register zeroed exactly as the loop's final iteration would.
+static void idle_wait (uint8_t reg)
+{
+  while (delay_timer != 0)
+    {
+      if (all_keys_down () & (1u << 31))
+	break;
+      usleep (NANOS_PER_TICK / 4000);	// ~4 ms; several checks per 60 Hz tick
+      interrupt ();
+    }
+  regs[reg] = 0;
+}
+#endif
 
 uint32_t clearscreen ()
 {
@@ -506,7 +529,11 @@ uint32_t load_sprite_addr ()
 {
   X;
 
-  addr = regs[x] * 5;
+  /* Fx29 selects a hex-digit font sprite.  The guide "The Art of CHIP-8"
+     warns against calling it with Vx > 15; interpreters that do not mask
+     land on an undefined address.  Masking to the low nibble makes the
+     font pointer well defined and identical across every engine. */
+  addr = (regs[x] & 0x0f) * 5;
   STEP;
 }
 
@@ -638,12 +665,19 @@ int main (int argc, const char *argv[])
       exit (-1);
     }
 #else
-  if (argc <= 1)
+  rom = NULL;
+  for (int i = 1; i < argc; ++i)
     {
-      fprintf (stderr, "Usage: %s <rom>\n", argv[0]);
+      if (strcmp (argv[i], "--elide-idle") == 0)
+	elide_idle = 1;
+      else if (rom == NULL)
+	rom = argv[i];
+    }
+  if (rom == NULL)
+    {
+      fprintf (stderr, "Usage: %s [--elide-idle] <rom>\n", argv[0]);
       exit (-1);
     }
-  rom = argv[1];
 #endif
 
   // load
@@ -675,6 +709,19 @@ int main (int argc, const char *argv[])
 	{
 	  break;
 	}
+#ifndef BENCH
+      if (elide_idle)
+	{
+	  uint8_t reg;
+	  if (chip8_idle_delay_loop (program_counter, &reg) && delay_timer != 0)
+	    {
+	      idle_wait (reg);
+	      program_counter += 6;	// past Fx07 / 3x00 / 1nnn
+	      inst_count += 3;
+	      continue;
+	    }
+	}
+#endif
 #ifdef BENCH
       // Count before executing, exactly as the JITs' emitted accounting does:
       // an instruction that reads a timer must see the same virtual clock in
